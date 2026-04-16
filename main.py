@@ -39,20 +39,15 @@ def create_tables():
 
 create_tables()
 
-st.title("📊 Tahsilat Yönetim Paneli")
+st.title("📊 Tahsilat Sistemi")
 
 # ----------------- ÖĞRENCİ EKLE -----------------
-with st.expander("👨‍🎓 Öğrenci Ekle", expanded=True):
+with st.expander("👨‍🎓 Öğrenci Ekle"):
 
-    col1, col2 = st.columns(2)
-
-    with col1:
-        ogrenci = st.text_input("Öğrenci Adı")
-        veli = st.text_input("Veli Adı")
-
-    with col2:
-        telefon = st.text_input("Telefon")
-        tc = st.text_input("TC Kimlik No")
+    ogrenci = st.text_input("Öğrenci Adı")
+    veli = st.text_input("Veli Adı")
+    telefon = st.text_input("Telefon")
+    tc = st.text_input("TC Kimlik")
 
     if st.button("Kaydet"):
         conn = get_connection()
@@ -66,65 +61,90 @@ with st.expander("👨‍🎓 Öğrenci Ekle", expanded=True):
         conn.commit()
         conn.close()
 
-        st.success("Öğrenci eklendi!")
+        st.success("Kaydedildi")
+        st.rerun()
 
-# ----------------- VERİLERİ ÇEK -----------------
+# ----------------- VERİLER -----------------
 conn = get_connection()
 
 df_ogr = pd.read_sql("SELECT * FROM ogrenciler", conn)
 
 df_plan = pd.read_sql("""
-SELECT o.id, ogr.ad as ogrenci, ogr.telefon, o.vade, o.tutar, o.durum
+SELECT o.id, ogr.ad, ogr.telefon, o.vade, o.tutar, o.durum
 FROM odemeler o
 JOIN ogrenciler ogr ON o.ogrenci_id = ogr.id
 """, conn)
 
 conn.close()
 
-# ----------------- PLAN -----------------
+# ----------------- BORÇ / TAKSİT -----------------
 if not df_ogr.empty:
 
-    with st.expander("📅 Taksit Planı"):
+    st.subheader("💳 Borç / Taksit Oluştur")
 
-        ogrenci_sec = st.selectbox("Öğrenci", df_ogr["ad"])
+    sec = st.selectbox("Öğrenci Seç", df_ogr["ad"])
 
-        toplam = st.number_input("Toplam Borç", 0.0)
-        taksit = st.number_input("Taksit", 1)
-        ilk_tarih = st.date_input("İlk Tarih")
+    toplam = st.number_input("Toplam Borç", 0.0)
+    taksit = st.number_input("Taksit Sayısı", 1)
+    ilk_tarih = st.date_input("İlk Taksit Tarihi")
 
-        if st.button("Plan Oluştur"):
+    if st.button("Oluştur"):
 
-            sec = df_ogr[df_ogr["ad"] == ogrenci_sec]
+        ogr_id = df_ogr[df_ogr["ad"] == sec]["id"].values[0]
+        tutar = toplam / taksit
 
-            if not sec.empty:
-                ogr_id = sec["id"].values[0]
+        conn = get_connection()
+        cursor = conn.cursor()
 
-                conn = get_connection()
-                cursor = conn.cursor()
+        for i in range(int(taksit)):
+            vade = ilk_tarih + timedelta(days=30 * i)
 
-                tutar = toplam / taksit
+            cursor.execute(
+                "INSERT INTO odemeler (ogrenci_id, vade, tutar, durum) VALUES (?, ?, ?, ?)",
+                (ogr_id, vade, tutar, "Bekliyor")
+            )
 
-                for i in range(int(taksit)):
-                    vade = ilk_tarih + timedelta(days=30 * i)
+        conn.commit()
+        conn.close()
 
-                    cursor.execute(
-                        "INSERT INTO odemeler (ogrenci_id, vade, tutar, durum) VALUES (?, ?, ?, ?)",
-                        (ogr_id, vade, tutar, "Bekliyor")
-                    )
+        st.success("Taksit oluşturuldu")
+        st.rerun()
 
-                conn.commit()
-                conn.close()
+# ----------------- BUGÜN -----------------
+st.subheader("📅 Bugün Ödemesi Olanlar")
 
-                st.success("Plan oluşturuldu!")
-                st.rerun()
+bugun = date.today()
 
-# ----------------- TAKSİTLER -----------------
-st.subheader("📋 Taksitler")
+df_plan["vade"] = pd.to_datetime(df_plan["vade"]).dt.date
 
-if not df_plan.empty:
-    st.dataframe(df_plan)
+df_today = df_plan[(df_plan["vade"] == bugun) & (df_plan["durum"] != "Ödendi")]
+
+if not df_today.empty:
+    st.dataframe(df_today)
 else:
-    st.info("Veri yok")
+    st.info("Bugün ödeme yok")
+
+# ----------------- GECİKEN -----------------
+st.subheader("⏰ Gecikenler")
+
+df_geciken = df_plan[(df_plan["vade"] < bugun) & (df_plan["durum"] != "Ödendi")]
+
+if not df_geciken.empty:
+    st.dataframe(df_geciken)
+else:
+    st.info("Geciken yok")
+
+# ----------------- ÖĞRENCİ DETAY -----------------
+st.subheader("👤 Öğrenci Detay")
+
+if not df_ogr.empty:
+
+    sec_ogr = st.selectbox("Detay için öğrenci", df_ogr["ad"])
+
+    df_detay = df_plan[df_plan["ad"] == sec_ogr].sort_values("vade")
+
+    if not df_detay.empty:
+        st.dataframe(df_detay)
 
 # ----------------- TAHSİLAT -----------------
 st.subheader("💰 Tahsilat")
@@ -132,14 +152,14 @@ st.subheader("💰 Tahsilat")
 if not df_plan.empty:
 
     secim = st.selectbox(
-        "Seç",
-        df_plan.apply(lambda x: f"{x['ogrenci']} | {x['vade']} | {x['tutar']}", axis=1)
+        "Taksit Seç",
+        df_plan.apply(lambda x: f"{x['ad']} | {x['vade']} | {x['tutar']}", axis=1)
     )
 
     if st.button("Ödendi Yap"):
 
         sec_id = df_plan.iloc[
-            df_plan.apply(lambda x: f"{x['ogrenci']} | {x['vade']} | {x['tutar']}", axis=1)
+            df_plan.apply(lambda x: f"{x['ad']} | {x['vade']} | {x['tutar']}", axis=1)
             == secim
         ]["id"].values[0]
 
@@ -147,64 +167,18 @@ if not df_plan.empty:
         cursor = conn.cursor()
 
         cursor.execute("UPDATE odemeler SET durum='Ödendi' WHERE id=?", (sec_id,))
-
         conn.commit()
         conn.close()
 
-        st.success("Tahsilat alındı!")
+        st.success("Ödeme alındı")
         st.rerun()
 
-# ----------------- ÖZET -----------------
-st.subheader("📊 Genel Durum")
+# ----------------- ARŞİV -----------------
+st.subheader("📁 Arşiv (Ödenenler)")
 
-conn = get_connection()
+df_odenen = df_plan[df_plan["durum"] == "Ödendi"]
 
-df_ozet = pd.read_sql("""
-SELECT 
-    ogr.ad,
-    SUM(o.tutar) as toplam,
-    SUM(CASE WHEN o.durum = 'Ödendi' THEN o.tutar ELSE 0 END) as odenen,
-    SUM(CASE WHEN o.durum != 'Ödendi' THEN o.tutar ELSE 0 END) as kalan
-FROM odemeler o
-JOIN ogrenciler ogr ON o.ogrenci_id = ogr.id
-GROUP BY ogr.ad
-""", conn)
-
-conn.close()
-
-if not df_ozet.empty:
-    st.dataframe(df_ozet)
+if not df_odenen.empty:
+    st.dataframe(df_odenen)
 else:
-    st.info("Veri yok")
-
-# ----------------- GECİKEN -----------------
-st.subheader("⏰ Gecikenler")
-
-conn = get_connection()
-
-df_geciken = pd.read_sql("""
-SELECT ogr.ad, ogr.telefon, o.vade, o.tutar
-FROM odemeler o
-JOIN ogrenciler ogr ON o.ogrenci_id = ogr.id
-WHERE o.durum != 'Ödendi'
-""", conn)
-
-conn.close()
-
-if not df_geciken.empty:
-
-    df_geciken["vade"] = pd.to_datetime(df_geciken["vade"]).dt.date
-    bugun = date.today()
-
-    df_geciken = df_geciken[df_geciken["vade"] < bugun]
-
-    for _, row in df_geciken.iterrows():
-
-        mesaj = f"Sayın veli, {row['ad']} için {row['tutar']} TL ödemeniz gecikmiştir."
-        url = "https://wa.me/90" + str(row["telefon"]) + "?text=" + urllib.parse.quote(mesaj)
-
-        st.write(f"{row['ad']} - {row['tutar']} ₺ - {row['vade']}")
-        st.link_button("WhatsApp Gönder", url)
-
-else:
-    st.info("Geciken yok")
+    st.info("Henüz ödeme yok")
