@@ -104,11 +104,70 @@ with col_bugun:
     st.subheader("📅 Bugünün Ödemeleri")
     if not df_plan.empty:
         bugun_df = df_plan[(df_plan["vade"] == bugun) & (df_plan["durum"] != "Ödendi")]
-        # hide_index=True ile soldaki o kod gibi duran numaraları gizledik
-        st.dataframe(bugun_df, use_container_width=True, hide_index=True) if not bugun_df.empty else st.info("Bugün ödeme yok.")
+        if not bugun_df.empty:
+            st.dataframe(bugun_df, use_container_width=True, hide_index=True) 
+        else:
+            st.info("Bugün ödeme yok.")
 
 with col_geciken:
     st.subheader("⏰ Geciken Ödemeler")
     if not df_plan.empty:
         geciken_df = df_plan[(df_plan["vade"] < bugun) & (df_plan["durum"] != "Ödendi")]
-        st.dataframe(geciken_df, use_container_width=True, hide_index=True) if not geciken_df.empty else st.success("Gec
+        if not geciken_df.empty:
+            st.dataframe(geciken_df, use_container_width=True, hide_index=True) 
+        else:
+            st.success("Gecikmiş ödeme yok.")
+
+# ----------------- GELİŞMİŞ ARAMALI TAHSİLAT -----------------
+st.divider()
+st.subheader("💰 Akıllı Tahsilat Ekranı")
+
+arama = st.text_input("Öğrenci Ara (İsim veya Öğrenci ID giriniz)", placeholder="Örn: Yusuf veya 41")
+
+if not df_plan.empty:
+    df_bekliyor = df_plan[df_plan["durum"] != "Ödendi"].copy()
+    
+    if arama:
+        df_bekliyor = df_bekliyor[
+            (df_bekliyor['ad'].str.contains(arama, case=False, na=False, regex=False)) | 
+            (df_bekliyor['ogr_id'].astype(str) == arama)
+        ]
+
+    if not df_bekliyor.empty:
+        df_bekliyor["secim_metni"] = df_bekliyor.apply(
+            lambda x: f"{x['ad']} | Vade: {x['vade']} | Tutar: {x['tutar']} TL (İşlem No: {x['islem_no']})", axis=1
+        )
+        
+        secenekler = ["--- Lütfen Seçim Yapınız ---"] + df_bekliyor["secim_metni"].tolist()
+        secilen_metin = st.selectbox("Tahsil edilecek taksiti seçin:", secenekler)
+        
+        if secilen_metin != "--- Lütfen Seçim Yapınız ---":
+            secilen_islem_no = int(secilen_metin.split("(İşlem No: ")[1].replace(")", ""))
+            sec_satir = df_bekliyor[df_bekliyor["islem_no"] == secilen_islem_no]
+            
+            st.warning(f"Seçilen Kişi: {sec_satir['ad'].values[0]} | Tutar: {sec_satir['tutar'].values[0]} TL")
+            
+            if st.button("Ödemeyi Onayla ve Kasaya İşle"):
+                conn = get_connection()
+                cursor = conn.cursor()
+                cursor.execute("UPDATE odemeler SET durum='Ödendi' WHERE id=?", (secilen_islem_no,))
+                conn.commit()
+                conn.close()
+                st.success("Tahsilat yapıldı, liste güncelleniyor...")
+                st.rerun()
+    else:
+        st.info("Aramanıza uygun bekleyen taksit bulunamadı.")
+
+# ----------------- LİSTELER -----------------
+st.divider()
+tab1, tab2 = st.tabs(["📋 Tüm Kayıtlar", "📁 Ödenmiş Arşivi"])
+
+with tab1:
+    if not df_plan.empty:
+        st.dataframe(df_plan.sort_values(by="vade"), use_container_width=True, hide_index=True)
+    else:
+        st.write("Kayıt yok.")
+
+with tab2:
+    if not df_plan.empty:
+        st.dataframe(df_plan[df_plan["durum"] == "Ödendi"], use_container_width=True, hide_index=True)
