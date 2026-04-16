@@ -1,14 +1,8 @@
-import os
-
-if os.path.exists("data.db"):
-    os.remove("data.db"
-              
 import streamlit as st
 import pandas as pd
 import sqlite3
-from datetime import datetime, timedelta, date
+from datetime import timedelta, date
 import urllib.parse
-)
 
 st.set_page_config(page_title="Tahsilat Sistemi", layout="wide")
 
@@ -57,7 +51,7 @@ with st.expander("👨‍🎓 Öğrenci Ekle", expanded=True):
         veli = st.text_input("Veli Adı")
 
     with col2:
-        telefon = st.text_input("Telefon (5XXXXXXXXX)")
+        telefon = st.text_input("Telefon")
         tc = st.text_input("TC Kimlik No")
 
     if st.button("Kaydet"):
@@ -74,58 +68,57 @@ with st.expander("👨‍🎓 Öğrenci Ekle", expanded=True):
 
         st.success("Öğrenci eklendi!")
 
-# ----------------- VERİLER -----------------
+# ----------------- VERİLERİ ÇEK -----------------
 conn = get_connection()
-cursor = conn.cursor()
 
-try:
-    cursor.execute("ALTER TABLE ogrenciler ADD COLUMN tc TEXT")
-except:
-    pass
+df_ogr = pd.read_sql("SELECT * FROM ogrenciler", conn)
 
-conn.commit()
+df_plan = pd.read_sql("""
+SELECT o.id, ogr.ad as ogrenci, ogr.telefon, o.vade, o.tutar, o.durum
+FROM odemeler o
+JOIN ogrenciler ogr ON o.ogrenci_id = ogr.id
+""", conn)
+
 conn.close()
 
 # ----------------- PLAN -----------------
 if not df_ogr.empty:
 
-    with st.expander("📅 Taksit Planı Oluştur"):
+    with st.expander("📅 Taksit Planı"):
 
         ogrenci_sec = st.selectbox("Öğrenci", df_ogr["ad"])
 
-        col1, col2, col3 = st.columns(3)
-
-        with col1:
-            toplam = st.number_input("Toplam Borç", 0.0)
-
-        with col2:
-            taksit = st.number_input("Taksit", 1)
-
-        with col3:
-            ilk_tarih = st.date_input("İlk Tarih")
+        toplam = st.number_input("Toplam Borç", 0.0)
+        taksit = st.number_input("Taksit", 1)
+        ilk_tarih = st.date_input("İlk Tarih")
 
         if st.button("Plan Oluştur"):
 
-            conn = get_connection()
-            cursor = conn.cursor()
+            sec = df_ogr[df_ogr["ad"] == ogrenci_sec]
 
-            ogr_id = df_ogr[df_ogr["ad"] == ogrenci_sec]["id"].values[0]
-            tutar = toplam / taksit
+            if not sec.empty:
+                ogr_id = sec["id"].values[0]
 
-            for i in range(int(taksit)):
-                vade = ilk_tarih + timedelta(days=30 * i)
+                conn = get_connection()
+                cursor = conn.cursor()
 
-                cursor.execute(
-                    "INSERT INTO odemeler (ogrenci_id, vade, tutar, durum) VALUES (?, ?, ?, ?)",
-                    (ogr_id, vade, tutar, "Bekliyor")
-                )
+                tutar = toplam / taksit
 
-            conn.commit()
-            conn.close()
+                for i in range(int(taksit)):
+                    vade = ilk_tarih + timedelta(days=30 * i)
 
-            st.success("Plan oluşturuldu!")
+                    cursor.execute(
+                        "INSERT INTO odemeler (ogrenci_id, vade, tutar, durum) VALUES (?, ?, ?, ?)",
+                        (ogr_id, vade, tutar, "Bekliyor")
+                    )
 
-# ----------------- TABLO -----------------
+                conn.commit()
+                conn.close()
+
+                st.success("Plan oluşturuldu!")
+                st.rerun()
+
+# ----------------- TAKSİTLER -----------------
 st.subheader("📋 Taksitler")
 
 if not df_plan.empty:
@@ -180,8 +173,7 @@ GROUP BY ogr.ad
 conn.close()
 
 if not df_ozet.empty:
-    for _, row in df_ozet.iterrows():
-        st.metric(row["ad"], f"Kalan: {row['kalan']} ₺", f"Ödenen: {row['odenen']} ₺")
+    st.dataframe(df_ozet)
 else:
     st.info("Veri yok")
 
@@ -211,13 +203,8 @@ if not df_geciken.empty:
         mesaj = f"Sayın veli, {row['ad']} için {row['tutar']} TL ödemeniz gecikmiştir."
         url = "https://wa.me/90" + str(row["telefon"]) + "?text=" + urllib.parse.quote(mesaj)
 
-        col1, col2, col3 = st.columns([2,1,1])
-
-        with col1:
-            st.write(f"{row['ad']} - {row['tutar']} ₺ - {row['vade']}")
-
-        with col2:
-            st.link_button("WhatsApp", url)
+        st.write(f"{row['ad']} - {row['tutar']} ₺ - {row['vade']}")
+        st.link_button("WhatsApp Gönder", url)
 
 else:
     st.info("Geciken yok")
