@@ -59,26 +59,38 @@ def verileri_yukle():
 
 df_ogr, df_plan = verileri_yukle()
 
-# ----------------- ÖĞRENCİ + BORÇ EKLEME -----------------
+# ----------------- ÖĞRENCİ + BORÇ EKLEME (FORM İLE SIFIRLANAN YAPI) -----------------
 with st.expander("👨‍🎓 Yeni Kayıt ve Borçlandırma", expanded=False):
-    c1, c2 = st.columns(2)
-    with c1:
-        ogrenci = st.text_input("Öğrenci Adı")
-        veli = st.text_input("Veli Adı")
-        tc = st.text_input("TC Kimlik")
-    with c2:
-        telefon = st.text_input("Telefon")
-        toplam = st.number_input("Toplam Borç", min_value=0.0, step=100.0)
-        taksit = st.number_input("Taksit Sayısı", min_value=1, step=1)
     
-    ilk_tarih = st.date_input("İlk Taksit Tarihi", value=date.today())
+    # Başarı mesajının ekranda bir süre kalması için hafıza devresi
+    if "kayit_basarili" in st.session_state:
+        st.success(st.session_state.kayit_basarili)
+        del st.session_state.kayit_basarili # Mesajı gösterdikten sonra hafızadan sil
 
-    if st.button("Kaydı Tamamla ve Taksitlendir"):
+    # clear_on_submit=True ile butona basılınca kutuları temizleyen form
+    with st.form("yeni_kayit_formu", clear_on_submit=True):
+        c1, c2 = st.columns(2)
+        with c1:
+            ogrenci = st.text_input("Öğrenci Adı")
+            veli = st.text_input("Veli Adı")
+            tc = st.text_input("TC Kimlik")
+        with c2:
+            telefon = st.text_input("Telefon")
+            toplam = st.number_input("Toplam Borç", min_value=0.0, step=100.0)
+            taksit = st.number_input("Taksit Sayısı", min_value=1, step=1)
+        
+        ilk_tarih = st.date_input("İlk Taksit Tarihi", value=date.today())
+
+        # Formun kendi onay butonu (st.button yerine bu kullanılır)
+        kaydedildi = st.form_submit_button("Kaydı Tamamla ve Taksitlendir")
+
+    # Eğer butona basıldıysa işlemleri yap
+    if kaydedildi:
         if ogrenci and toplam > 0:
             conn = get_connection()
             cursor = conn.cursor()
             
-            # Öğrenci var mı bak, yoksa ekle (Öğrenci ID burada sabitlenir)
+            # Öğrenci var mı bak, yoksa ekle
             mevcut = df_ogr[df_ogr["ad"] == ogrenci]
             if not mevcut.empty:
                 ogr_id = int(mevcut["id"].values[0])
@@ -87,7 +99,7 @@ with st.expander("👨‍🎓 Yeni Kayıt ve Borçlandırma", expanded=False):
                                (ogrenci, veli, telefon, tc))
                 ogr_id = cursor.lastrowid
 
-            # Taksitleri oluştur (Her taksite benzersiz İşlem ID'si verilir)
+            # Taksitleri oluştur
             tutar = toplam / taksit
             for i in range(int(taksit)):
                 vade = ilk_tarih + timedelta(days=30 * i)
@@ -96,7 +108,9 @@ with st.expander("👨‍🎓 Yeni Kayıt ve Borçlandırma", expanded=False):
             
             conn.commit()
             conn.close()
-            st.success(f"{ogrenci} için {taksit} taksit başarıyla oluşturuldu!")
+            
+            # Başarı mesajını hafızaya at ve sayfayı yenile ki listelere düşsün
+            st.session_state.kayit_basarili = f"{ogrenci} için {taksit} taksit başarıyla oluşturuldu!"
             st.rerun()
         else:
             st.error("Lütfen öğrenci adı ve toplam borç giriniz.")
@@ -129,21 +143,15 @@ st.divider()
 st.subheader("💰 Elle Tahsilat Yap")
 
 if not df_plan.empty:
-    # Sadece bekleyenleri göster
     df_bekliyor = df_plan[df_plan["durum"] != "Ödendi"].copy()
     
     if not df_bekliyor.empty:
-        # Kafa karıştıran "ID" metni "İşlem No" olarak değiştirildi
         df_bekliyor["liste_metni"] = df_bekliyor.apply(
             lambda x: f"İşlem No: {x['id']} ➔ {x['ad']} | Vade: {x['vade']} | Tutar: {x['tutar']} TL", axis=1
         )
         
         secilen_metin = st.selectbox("Tahsil edilecek taksiti seçin:", df_bekliyor["liste_metni"])
-        
-        # Seçilen İşlem No'yu arka planda ayıkla
         secilen_id = int(secilen_metin.split(" ➔ ")[0].replace("İşlem No: ", ""))
-        
-        # Seçilen satırın detayını göster
         sec_satir = df_bekliyor[df_bekliyor["id"] == secilen_id]
         st.info(f"Seçilen: **{sec_satir['ad'].values[0]}** - Tutar: **{sec_satir['tutar'].values[0]} TL**")
 
