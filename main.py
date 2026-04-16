@@ -1,8 +1,3 @@
-import os
-
-if os.path.exists("data.db"):
-    os.remove("data.db")
-    
 import streamlit as st
 import pandas as pd
 import sqlite3
