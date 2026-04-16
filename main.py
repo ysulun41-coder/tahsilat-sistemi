@@ -57,10 +57,6 @@ st.title("📊 Tahsilat Sistemi")
 
 # ----------------- YENİ ÖĞRENCİ KAYIT -----------------
 with st.expander("👨‍🎓 Yeni Kayıt ve Borçlandırma", expanded=False):
-    if "basari_notu" in st.session_state:
-        st.success(st.session_state.basari_notu)
-        del st.session_state.basari_notu
-
     with st.form("kayit_formu", clear_on_submit=True):
         c1, c2 = st.columns(2)
         with c1:
@@ -92,7 +88,7 @@ with st.expander("👨‍🎓 Yeni Kayıt ve Borçlandırma", expanded=False):
         
         conn.commit()
         conn.close()
-        st.session_state.basari_notu = f"{y_ad} başarıyla kaydedildi."
+        st.success(f"{y_ad} başarıyla kaydedildi.")
         st.rerun()
 
 # ----------------- GÜNLÜK VE GECİKEN TAKİP -----------------
@@ -111,24 +107,28 @@ with p2:
         g_liste = df_plan[(df_plan["vade"] < bugun) & (df_plan["durum"] != "Ödendi")]
         st.dataframe(g_liste, use_container_width=True, hide_index=True, column_config=sutun_ayarlar) if not g_liste.empty else st.success("Gecikmiş ödeme bulunmuyor.")
 
-# ----------------- TAHSİLAT GİRİŞİ (ARAMA VE HESAP ÖZETİ) -----------------
+# ----------------- TAHSİLAT GİRİŞİ (SIFIR HATA GARANTİLİ) -----------------
 st.divider()
 st.subheader("💰 Tahsilat Girişi")
 
-# Arama kutusunu session state ile yönetiyoruz (sıfırlanması için)
-if "arama_degeri" not in st.session_state:
-    st.session_state.arama_degeri = ""
+# İŞTE KESİN ÇÖZÜM: Her işlemde arama kutusuna yeni bir kimlik verip sıfırlıyoruz
+if "arama_sayaci" not in st.session_state:
+    st.session_state.arama_sayaci = 0
 
-arama = st.text_input("🔍 Öğrenci Ara (İsim veya Sabit Öğrenci ID giriniz)", value=st.session_state.arama_degeri, placeholder="Örn: Oğuzhan veya 41")
+arama = st.text_input(
+    "🔍 Öğrenci Ara (İsim veya Sabit Öğrenci ID giriniz)", 
+    key=f"arama_kutusu_{st.session_state.arama_sayaci}", 
+    placeholder="Örn: Oğuzhan veya 41"
+)
 
 if not df_plan.empty:
     df_bekliyor = df_plan[df_plan["durum"] != "Ödendi"].copy()
     
-    # Arama filtresi
+    # Harf duyarlılığını ortadan kaldıran güvenli arama filtresi
     if arama:
-        aranan = arama.strip().upper()
+        aranan = arama.strip().lower()
         df_islem = df_bekliyor[
-            df_bekliyor["ad"].str.upper().str.contains(aranan, na=False) |
+            df_bekliyor["ad"].str.lower().str.contains(aranan, na=False, regex=False) |
             (df_bekliyor["ogr_id"].astype(str) == aranan)
         ]
     else:
@@ -144,7 +144,7 @@ if not df_plan.empty:
             secilen_satir = df_islem[df_islem["islem_no"] == islem_id].iloc[0]
             secilen_ogr_id = int(secilen_satir["ogr_id"])
 
-            # HESAP ÖZETİ HESAPLAMA (Buradaki hata düzeltildi)
+            # HESAP ÖZETİ
             kisi_tum_kayitlar = df_plan[df_plan["ogr_id"] == secilen_ogr_id]
             t_planlanan = kisi_tum_kayitlar["tutar"].sum()
             t_odenen = kisi_tum_kayitlar[kisi_tum_kayitlar["durum"] == "Ödendi"]["tutar"].sum()
@@ -160,27 +160,34 @@ if not df_plan.empty:
             
             tutar_giris = st.number_input("Kasaya Girecek Miktar (TL)", min_value=0.0, value=float(secilen_satir["tutar"]), step=50.0, format="%.2f")
 
-            if st.button("Ödemeyi Onayla"):
+            if st.button("Ödemeyi Onayla ve Kasaya İşle"):
                 conn = get_connection()
                 cursor = conn.cursor()
-                asıl = float(secilen_satir["tutar"])
+                asil = float(secilen_satir["tutar"])
 
-                if tutar_giris < asıl:
+                if tutar_giris < asil:
                     # Eksik Ödeme
                     cursor.execute("UPDATE odemeler SET durum='Ödendi', tutar=? WHERE id=?", (tutar_giris, islem_id))
-                    cursor.execute("INSERT INTO odemeler (ogrenci_id, vade, tutar, durum) VALUES (?, ?, ?, 'Bekliyor')", (secilen_ogr_id, secilen_satir["vade"], asıl - tutar_giris))
-                    st.toast("Eksik tahsilat alındı, fark yeni taksit olarak eklendi.")
+                    cursor.execute("INSERT INTO odemeler (ogrenci_id, vade, tutar, durum) VALUES (?, ?, ?, 'Bekliyor')", (secilen_ogr_id, secilen_satir["vade"], asil - tutar_giris))
+                    st.session_state.islem_mesaji = "Eksik tahsilat alındı, kalan tutar yeni taksit olarak eklendi."
                 else:
                     # Tam veya Fazla Ödeme
                     cursor.execute("UPDATE odemeler SET durum='Ödendi', tutar=? WHERE id=?", (tutar_giris, islem_id))
-                    st.toast("Tahsilat başarıyla kaydedildi.")
+                    st.session_state.islem_mesaji = "Tahsilat başarıyla kaydedildi."
                 
                 conn.commit()
                 conn.close()
-                st.session_state.arama_degeri = "" # Arama kutusunu sıfırla
+                
+                # SİGORTA: Sayacı 1 artırarak arama kutusunu tamamen yenile (Kırmızı ekranı bitiren satır)
+                st.session_state.arama_sayaci += 1 
                 st.rerun()
     else:
         st.info("Aramanıza uygun bekleyen taksit bulunamadı.")
+
+# İşlem sonrası mesajı göster
+if "islem_mesaji" in st.session_state:
+    st.success(st.session_state.islem_mesaji)
+    del st.session_state.islem_mesaji
 
 # ----------------- ARŞİV VE TÜM LİSTE -----------------
 st.divider()
