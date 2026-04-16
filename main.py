@@ -70,14 +70,14 @@ with st.expander("👨‍🎓 Öğrenci Ekle", expanded=True):
 
 # ----------------- VERİLER -----------------
 conn = get_connection()
-df_ogr = pd.read_sql("SELECT * FROM ogrenciler", conn)
+cursor = conn.cursor()
 
-df_plan = pd.read_sql("""
-SELECT o.id, ogr.ad as ogrenci, ogr.telefon, o.vade, o.tutar, o.durum
-FROM odemeler o
-JOIN ogrenciler ogr ON o.ogrenci_id = ogr.id
-""", conn)
+try:
+    cursor.execute("ALTER TABLE ogrenciler ADD COLUMN tc TEXT")
+except:
+    pass
 
+conn.commit()
 conn.close()
 
 # ----------------- PLAN -----------------
