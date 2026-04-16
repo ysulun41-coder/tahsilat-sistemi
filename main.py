@@ -116,19 +116,21 @@ with p2:
 st.divider()
 st.subheader("💰 Tahsilat Girişi")
 
-# İŞTE ÇÖZÜM: Arama kutusunun kendi kendini temizlemesi için hafıza
-if "arama_kutusu" not in st.session_state:
+# İŞTE ÇÖZÜM: Kırmızı ekranı engelleyen temizlik rölesi
+if "temizle_tetik" not in st.session_state:
+    st.session_state.temizle_tetik = False
+
+if st.session_state.temizle_tetik:
     st.session_state.arama_kutusu = ""
+    st.session_state.temizle_tetik = False
 
 arama = st.text_input("🔍 Öğrenci Ara (İsim veya Öğrenci ID yazın)", key="arama_kutusu", placeholder="Örn: Oğuzhan veya 41")
 
 if not df_plan.empty:
-    # Sadece bekleyenleri al ve boş/hatalı isimleri temizle
     df_islem = df_plan[df_plan["durum"] != "Ödendi"].copy()
     df_islem["ad"] = df_islem["ad"].fillna("").astype(str)
     df_islem["ogr_id"] = df_islem["ogr_id"].astype(str)
     
-    # Harf duyarsız güçlü filtre
     if arama:
         aranan = arama.strip()
         df_islem = df_islem[
@@ -161,7 +163,6 @@ if not df_plan.empty:
 
             st.info(f"**Seçilen Taksit:** {satir['vade']} | **Asıl Tutar:** {satir['tutar']} TL")
             
-            # --- Eksik / Fazla Ödeme Girişi ---
             tutar_giris = st.number_input("Kasaya Giren Miktar (TL)", min_value=0.0, value=float(satir["tutar"]), step=50.0)
 
             if st.button("Ödemeyi Onayla ve Kasaya İşle"):
@@ -170,26 +171,23 @@ if not df_plan.empty:
                 asıl_tutar = float(satir["tutar"])
 
                 if tutar_giris < asıl_tutar:
-                    # Eksik ödeme
                     cursor.execute("UPDATE odemeler SET durum='Ödendi', tutar=? WHERE id=?", (tutar_giris, islem_id))
                     fark = asıl_tutar - tutar_giris
                     cursor.execute("INSERT INTO odemeler (ogrenci_id, vade, tutar, durum) VALUES (?, ?, ?, 'Bekliyor')", (satir["ogr_id"], satir["vade"], fark))
                     st.session_state.islem_notu = "Eksik ödeme alındı, kalan miktar listeye yeni taksit olarak eklendi."
                 else:
-                    # Tam veya Fazla ödeme
                     cursor.execute("UPDATE odemeler SET durum='Ödendi', tutar=? WHERE id=?", (tutar_giris, islem_id))
                     st.session_state.islem_notu = "Tahsilat başarıyla kaydedildi."
 
                 conn.commit()
                 conn.close()
                 
-                # İŞTE SİGORTA BURADA: İşlem biter bitmez arama kutusunu sıfırla
-                st.session_state.arama_kutusu = ""
+                # SİGORTAYI TETİKLE VE YENİDEN BAŞLAT
+                st.session_state.temizle_tetik = True
                 st.rerun()
     else:
         st.warning("Aramanıza uygun bekleyen borç bulunamadı.")
 
-# İşlem sonrası mesajı ekranda göstermek için
 if "islem_notu" in st.session_state:
     st.success(st.session_state.islem_notu)
     del st.session_state.islem_notu
