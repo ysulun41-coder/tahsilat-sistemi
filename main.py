@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 from datetime import timedelta, date
-import urllib.parse
 
 st.set_page_config(page_title="Tahsilat Sistemi", layout="wide")
 
@@ -41,110 +40,105 @@ create_tables()
 
 st.title("📊 Tahsilat Sistemi")
 
-# ----------------- ÖĞRENCİ EKLE -----------------
-with st.expander("👨‍🎓 Öğrenci Ekle"):
+# ----------------- ÖĞRENCİ + BORÇ -----------------
+with st.expander("👨‍🎓 Öğrenci + Borç Ekle", expanded=True):
 
-    ogrenci = st.text_input("Öğrenci Adı")
-    veli = st.text_input("Veli Adı")
-    telefon = st.text_input("Telefon")
-    tc = st.text_input("TC Kimlik")
+    col1, col2 = st.columns(2)
 
-    if st.button("Kaydet"):
+    with col1:
+        ogrenci = st.text_input("Öğrenci Adı")
+        veli = st.text_input("Veli Adı")
+        tc = st.text_input("TC Kimlik No")
+
+    with col2:
+        telefon = st.text_input("Telefon")
+        toplam = st.number_input("Toplam Borç", 0.0)
+        taksit = st.number_input("Taksit Sayısı", 1)
+        ilk_tarih = st.date_input("İlk Taksit Tarihi")
+
+    if st.button("Kaydet ve Plan Oluştur"):
+
         conn = get_connection()
         cursor = conn.cursor()
 
+        # öğrenci ekle
         cursor.execute(
             "INSERT INTO ogrenciler (ad, veli, telefon, tc) VALUES (?, ?, ?, ?)",
             (ogrenci, veli, telefon, tc)
         )
 
+        ogr_id = cursor.lastrowid
+
+        # taksit oluştur
+        if toplam > 0:
+            tutar = toplam / taksit
+
+            for i in range(int(taksit)):
+                vade = ilk_tarih + timedelta(days=30 * i)
+
+                cursor.execute(
+                    "INSERT INTO odemeler (ogrenci_id, vade, tutar, durum) VALUES (?, ?, ?, ?)",
+                    (ogr_id, vade, tutar, "Bekliyor")
+                )
+
         conn.commit()
         conn.close()
 
-        st.success("Kaydedildi")
+        st.success("Öğrenci ve borç kaydedildi!")
         st.rerun()
 
 # ----------------- VERİLER -----------------
 conn = get_connection()
 
-df_ogr = pd.read_sql("SELECT * FROM ogrenciler", conn)
-
 df_plan = pd.read_sql("""
-SELECT o.id, ogr.ad, ogr.telefon, o.vade, o.tutar, o.durum
+SELECT o.id, ogr.ad, ogr.telefon, ogr.tc, o.vade, o.tutar, o.durum
 FROM odemeler o
 JOIN ogrenciler ogr ON o.ogrenci_id = ogr.id
 """, conn)
 
 conn.close()
 
-# ----------------- BORÇ / TAKSİT -----------------
-if not df_ogr.empty:
-
-    st.subheader("💳 Borç / Taksit Oluştur")
-
-    sec = st.selectbox("Öğrenci Seç", df_ogr["ad"])
-
-    toplam = st.number_input("Toplam Borç", 0.0)
-    taksit = st.number_input("Taksit Sayısı", 1)
-    ilk_tarih = st.date_input("İlk Taksit Tarihi")
-
-    if st.button("Oluştur"):
-
-        ogr_id = df_ogr[df_ogr["ad"] == sec]["id"].values[0]
-        tutar = toplam / taksit
-
-        conn = get_connection()
-        cursor = conn.cursor()
-
-        for i in range(int(taksit)):
-            vade = ilk_tarih + timedelta(days=30 * i)
-
-            cursor.execute(
-                "INSERT INTO odemeler (ogrenci_id, vade, tutar, durum) VALUES (?, ?, ?, ?)",
-                (ogr_id, vade, tutar, "Bekliyor")
-            )
-
-        conn.commit()
-        conn.close()
-
-        st.success("Taksit oluşturuldu")
-        st.rerun()
-
 # ----------------- BUGÜN -----------------
 st.subheader("📅 Bugün Ödemesi Olanlar")
 
 bugun = date.today()
 
-df_plan["vade"] = pd.to_datetime(df_plan["vade"]).dt.date
+if not df_plan.empty:
+    df_plan["vade"] = pd.to_datetime(df_plan["vade"]).dt.date
 
-df_today = df_plan[(df_plan["vade"] == bugun) & (df_plan["durum"] != "Ödendi")]
+    df_today = df_plan[(df_plan["vade"] == bugun) & (df_plan["durum"] != "Ödendi")]
 
-if not df_today.empty:
-    st.dataframe(df_today)
-else:
-    st.info("Bugün ödeme yok")
+    if not df_today.empty:
+        st.dataframe(df_today)
+    else:
+        st.info("Bugün ödeme yok")
 
 # ----------------- GECİKEN -----------------
 st.subheader("⏰ Gecikenler")
 
-df_geciken = df_plan[(df_plan["vade"] < bugun) & (df_plan["durum"] != "Ödendi")]
+if not df_plan.empty:
+    df_geciken = df_plan[(df_plan["vade"] < bugun) & (df_plan["durum"] != "Ödendi")]
 
-if not df_geciken.empty:
-    st.dataframe(df_geciken)
-else:
-    st.info("Geciken yok")
+    if not df_geciken.empty:
+        st.dataframe(df_geciken)
+    else:
+        st.info("Geciken yok")
+
+# ----------------- TÜM TAKSİTLER -----------------
+st.subheader("📋 Tüm Taksitler")
+
+if not df_plan.empty:
+    st.dataframe(df_plan)
 
 # ----------------- ÖĞRENCİ DETAY -----------------
 st.subheader("👤 Öğrenci Detay")
 
-if not df_ogr.empty:
+if not df_plan.empty:
+    sec = st.selectbox("Öğrenci", df_plan["ad"].unique())
 
-    sec_ogr = st.selectbox("Detay için öğrenci", df_ogr["ad"])
+    detay = df_plan[df_plan["ad"] == sec].sort_values("vade")
 
-    df_detay = df_plan[df_plan["ad"] == sec_ogr].sort_values("vade")
-
-    if not df_detay.empty:
-        st.dataframe(df_detay)
+    st.dataframe(detay)
 
 # ----------------- TAHSİLAT -----------------
 st.subheader("💰 Tahsilat")
@@ -152,7 +146,7 @@ st.subheader("💰 Tahsilat")
 if not df_plan.empty:
 
     secim = st.selectbox(
-        "Taksit Seç",
+        "Seç",
         df_plan.apply(lambda x: f"{x['ad']} | {x['vade']} | {x['tutar']}", axis=1)
     )
 
@@ -176,9 +170,10 @@ if not df_plan.empty:
 # ----------------- ARŞİV -----------------
 st.subheader("📁 Arşiv (Ödenenler)")
 
-df_odenen = df_plan[df_plan["durum"] == "Ödendi"]
+if not df_plan.empty:
+    ar = df_plan[df_plan["durum"] == "Ödendi"]
 
-if not df_odenen.empty:
-    st.dataframe(df_odenen)
-else:
-    st.info("Henüz ödeme yok")
+    if not ar.empty:
+        st.dataframe(ar)
+    else:
+        st.info("Henüz ödeme yok")
