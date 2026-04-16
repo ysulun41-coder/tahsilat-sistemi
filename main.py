@@ -29,14 +29,12 @@ def fix_database():
         ogrenci_id INTEGER,
         vade DATE,
         tutar REAL,
-        odenen REAL DEFAULT 0,
         durum TEXT
     )
     """)
 
-    # kolon ekleme (varsa hata vermez)
     try:
-        cursor.execute("ALTER TABLE odemeler ADD COLUMN odenen REAL DEFAULT 0")
+        cursor.execute("ALTER TABLE ogrenciler ADD COLUMN tc TEXT")
     except:
         pass
 
@@ -49,11 +47,10 @@ st.title("📊 Tahsilat Sistemi")
 
 # ----------------- VERİLER -----------------
 conn = get_connection()
-
 df_ogr = pd.read_sql("SELECT * FROM ogrenciler", conn)
 
 df_plan = pd.read_sql("""
-SELECT o.id, ogr.ad, o.vade, o.tutar, o.odenen, o.durum
+SELECT o.id, ogr.ad, ogr.telefon, ogr.tc, o.vade, o.tutar, o.durum
 FROM odemeler o
 JOIN ogrenciler ogr ON o.ogrenci_id = ogr.id
 """, conn)
@@ -64,19 +61,20 @@ conn.close()
 with st.expander("👨‍🎓 Öğrenci + Borç Ekle", expanded=True):
 
     ogrenci = st.text_input("Öğrenci Adı")
-    veli = st.text_input("Veli")
+    veli = st.text_input("Veli Adı")
     telefon = st.text_input("Telefon")
-    tc = st.text_input("TC")
+    tc = st.text_input("TC Kimlik")
 
     toplam = st.number_input("Toplam Borç", 0.0)
-    taksit = st.number_input("Taksit", 1)
-    ilk_tarih = st.date_input("İlk Tarih")
+    taksit = st.number_input("Taksit Sayısı", 1)
+    ilk_tarih = st.date_input("İlk Taksit Tarihi")
 
     if st.button("Kaydet"):
 
         conn = get_connection()
         cursor = conn.cursor()
 
+        # aynı öğrenci var mı?
         mevcut = df_ogr[df_ogr["ad"] == ogrenci]
 
         if not mevcut.empty:
@@ -88,6 +86,7 @@ with st.expander("👨‍🎓 Öğrenci + Borç Ekle", expanded=True):
             )
             ogr_id = cursor.lastrowid
 
+        # taksit oluştur
         if toplam > 0:
             tutar = toplam / taksit
 
@@ -95,8 +94,8 @@ with st.expander("👨‍🎓 Öğrenci + Borç Ekle", expanded=True):
                 vade = ilk_tarih + timedelta(days=30 * i)
 
                 cursor.execute(
-                    "INSERT INTO odemeler (ogrenci_id, vade, tutar, odenen, durum) VALUES (?, ?, ?, ?, ?)",
-                    (ogr_id, vade, tutar, 0, "Bekliyor")
+                    "INSERT INTO odemeler (ogrenci_id, vade, tutar, durum) VALUES (?, ?, ?, ?)",
+                    (ogr_id, vade, tutar, "Bekliyor")
                 )
 
         conn.commit()
@@ -105,58 +104,50 @@ with st.expander("👨‍🎓 Öğrenci + Borç Ekle", expanded=True):
         st.success("Kayıt tamam")
         st.rerun()
 
-# ----------------- TAKSİTLER -----------------
-st.subheader("📋 Taksitler")
+# ----------------- BUGÜN -----------------
+st.subheader("📅 Bugün")
 
 if not df_plan.empty:
-    df_plan["kalan"] = df_plan["tutar"] - df_plan["odenen"]
+    df_plan["vade"] = pd.to_datetime(df_plan["vade"]).dt.date
+    bugun = date.today()
+
+    st.dataframe(df_plan[(df_plan["vade"] == bugun) & (df_plan["durum"] != "Ödendi")])
+
+# ----------------- GECİKEN -----------------
+st.subheader("⏰ Gecikenler")
+
+if not df_plan.empty:
+    bugun = date.today()
+    st.dataframe(df_plan[(df_plan["vade"] < bugun) & (df_plan["durum"] != "Ödendi")])
+
+# ----------------- TÜM TAKSİTLER -----------------
+st.subheader("📋 Tüm Taksitler")
+
+if not df_plan.empty:
     st.dataframe(df_plan)
 
 # ----------------- TAHSİLAT -----------------
-st.subheader("💰 Tahsilat (Kısmi Ödeme)")
+st.subheader("💰 Tahsilat")
 
 if not df_plan.empty:
 
     sec_id = st.selectbox("Taksit Seç", df_plan["id"])
 
-    sec = df_plan[df_plan["id"] == sec_id]
+    sec_satir = df_plan[df_plan["id"] == sec_id]
 
-    if not sec.empty:
+    st.write(sec_satir)
 
-        tutar = float(sec["tutar"].values[0])
-        odenen = float(sec["odenen"].values[0])
-        kalan = tutar - odenen
+    if st.button("Ödendi"):
 
-        st.write(f"Toplam: {tutar} ₺")
-        st.write(f"Ödenen: {odenen} ₺")
-        st.write(f"Kalan: {kalan} ₺")
+        conn = get_connection()
+        cursor = conn.cursor()
 
-        odeme = st.number_input("Ödeme Gir", 0.0)
+        cursor.execute("UPDATE odemeler SET durum='Ödendi' WHERE id=?", (sec_id,))
+        conn.commit()
+        conn.close()
 
-        if st.button("Ödeme Yap"):
-
-            yeni_odenen = odenen + odeme
-
-            if yeni_odenen >= tutar:
-                durum = "Ödendi"
-                yeni_odenen = tutar
-            else:
-                durum = "Bekliyor"
-
-            conn = get_connection()
-            cursor = conn.cursor()
-
-            cursor.execute("""
-            UPDATE odemeler 
-            SET odenen=?, durum=? 
-            WHERE id=?
-            """, (yeni_odenen, durum, sec_id))
-
-            conn.commit()
-            conn.close()
-
-            st.success("Ödeme kaydedildi")
-            st.rerun()
+        st.success("Ödeme alındı")
+        st.rerun()
 
 # ----------------- ARŞİV -----------------
 st.subheader("📁 Arşiv")
