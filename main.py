@@ -13,7 +13,7 @@ def get_connection():
 def fix_database():
     conn = get_connection()
     cursor = conn.cursor()
-    # Tabloları oluştur (Eğer yoksa)
+    # Tabloları oluştur 
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS ogrenciler (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -40,7 +40,7 @@ st.title("📊 Tahsilat Sistemi")
 def verileri_yukle():
     conn = get_connection()
     df_ogr = pd.read_sql("SELECT * FROM ogrenciler", conn)
-    # Taksitler ve Öğrenci Bilgileri Birleşik (Öğrenci ID'sini de çekiyoruz)
+    # Taksitler ve Öğrenci Bilgileri Birleşik
     df_plan = pd.read_sql("""
     SELECT o.id as islem_no, ogr.id as ogr_id, ogr.ad, ogr.telefon, ogr.tc, o.vade, o.tutar, o.durum
     FROM odemeler o
@@ -93,7 +93,7 @@ with st.expander("👨‍🎓 Yeni Kayıt ve Borçlandırma", expanded=False):
                                (ogr_id, vade, tutar, "Bekliyor"))
             conn.commit()
             conn.close()
-            st.session_state.kayit_basarili = f"{ogrenci} (ID: {ogr_id}) başarıyla kaydedildi!"
+            st.session_state.kayit_basarili = f"{ogrenci} başarıyla kaydedildi!"
             st.rerun()
 
 # ----------------- TAKİP PANELİ (BUGÜN / GECİKEN) -----------------
@@ -104,66 +104,11 @@ with col_bugun:
     st.subheader("📅 Bugünün Ödemeleri")
     if not df_plan.empty:
         bugun_df = df_plan[(df_plan["vade"] == bugun) & (df_plan["durum"] != "Ödendi")]
-        st.dataframe(bugun_df, use_container_width=True) if not bugun_df.empty else st.info("Bugün ödeme yok.")
+        # hide_index=True ile soldaki o kod gibi duran numaraları gizledik
+        st.dataframe(bugun_df, use_container_width=True, hide_index=True) if not bugun_df.empty else st.info("Bugün ödeme yok.")
 
 with col_geciken:
     st.subheader("⏰ Geciken Ödemeler")
     if not df_plan.empty:
         geciken_df = df_plan[(df_plan["vade"] < bugun) & (df_plan["durum"] != "Ödendi")]
-        st.dataframe(geciken_df, use_container_width=True) if not geciken_df.empty else st.success("Gecikmiş ödeme yok.")
-
-# ----------------- GELİŞMİŞ ARAMALI TAHSİLAT (YENİ KISIM) -----------------
-st.divider()
-st.subheader("💰 Akıllı Tahsilat Ekranı")
-
-# Arama Kutusu
-arama = st.text_input("Öğrenci Ara (İsim veya Sabit Öğrenci ID giriniz)", placeholder="Örn: Yusuf veya 41")
-
-if not df_plan.empty:
-    # Sadece bekleyenleri ayır
-    df_bekliyor = df_plan[df_plan["durum"] != "Ödendi"].copy()
-    
-    # Arama filtresi uygula
-    if arama:
-        # Hem isme hem de sabit öğrenci ID'sine göre filtrele
-        df_bekliyor = df_bekliyor[
-            (df_bekliyor['ad'].str.contains(arama, case=False, na=False)) | 
-            (df_bekliyor['ogr_id'].astype(str) == arama)
-        ]
-
-    if not df_bekliyor.empty:
-        # Seçim listesi için açıklayıcı metin oluştur
-        df_bekliyor["secim_metni"] = df_bekliyor.apply(
-            lambda x: f"İşlem No: {x['islem_no']} | Ögr ID: {x['ogr_id']} | {x['ad']} | Vade: {x['vade']} | {x['tutar']} TL", axis=1
-        )
-        
-        # Seçim kutusunu boş (placeholder) başlatmak için başa boş bir seçenek ekleyebiliriz
-        secenekler = ["--- Lütfen Seçim Yapınız ---"] + df_bekliyor["secim_metni"].tolist()
-        secilen_metin = st.selectbox("Tahsil edilecek taksiti seçin:", secenekler)
-        
-        if secilen_metin != "--- Lütfen Seçim Yapınız ---":
-            # İşlem No'yu çek
-            secilen_islem_no = int(secilen_metin.split(" | ")[0].replace("İşlem No: ", ""))
-            sec_satir = df_bekliyor[df_bekliyor["islem_no"] == secilen_islem_no]
-            
-            st.warning(f"Seçilen Kişi: {sec_satir['ad'].values[0]} | Tutar: {sec_satir['tutar'].values[0]} TL")
-            
-            if st.button("Ödemeyi Onayla ve Kasaya İşle"):
-                conn = get_connection()
-                cursor = conn.cursor()
-                cursor.execute("UPDATE odemeler SET durum='Ödendi' WHERE id=?", (secilen_islem_no,))
-                conn.commit()
-                conn.close()
-                st.success("Tahsilat yapıldı, liste güncelleniyor...")
-                st.rerun()
-    else:
-        st.info("Aramanıza uygun bekleyen taksit bulunamadı.")
-
-# ----------------- LİSTELER -----------------
-st.divider()
-tab1, tab2 = st.tabs(["📋 Tüm Kayıtlar", "📁 Ödenmiş Arşivi"])
-with tab1:
-    st.dataframe(df_plan.sort_values(by="vade"), use_container_width=True) if not df_plan.empty else st.write("Kayıt yok.")
-with tab2:
-    if not df_plan.empty:
-        st.dataframe(df_plan[df_plan["durum"] == "Ödendi"], use_container_width=True)
+        st.dataframe(geciken_df, use_container_width=True, hide_index=True) if not geciken_df.empty else st.success("Gec
