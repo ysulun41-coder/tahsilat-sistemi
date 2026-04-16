@@ -13,7 +13,6 @@ def fix_database():
     conn = get_connection()
     cursor = conn.cursor()
 
-    # tablo yoksa oluştur
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS ogrenciler (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -34,7 +33,6 @@ def fix_database():
     )
     """)
 
-    # eksik kolon varsa ekle
     try:
         cursor.execute("ALTER TABLE ogrenciler ADD COLUMN tc TEXT")
     except:
@@ -46,6 +44,18 @@ def fix_database():
 fix_database()
 
 st.title("📊 Tahsilat Sistemi")
+
+# ----------------- VERİLER -----------------
+conn = get_connection()
+df_ogr = pd.read_sql("SELECT * FROM ogrenciler", conn)
+
+df_plan = pd.read_sql("""
+SELECT o.id, ogr.ad, ogr.telefon, ogr.tc, o.vade, o.tutar, o.durum
+FROM odemeler o
+JOIN ogrenciler ogr ON o.ogrenci_id = ogr.id
+""", conn)
+
+conn.close()
 
 # ----------------- ÖĞRENCİ + BORÇ -----------------
 with st.expander("👨‍🎓 Öğrenci + Borç Ekle", expanded=True):
@@ -64,13 +74,19 @@ with st.expander("👨‍🎓 Öğrenci + Borç Ekle", expanded=True):
         conn = get_connection()
         cursor = conn.cursor()
 
-        cursor.execute(
-            "INSERT INTO ogrenciler (ad, veli, telefon, tc) VALUES (?, ?, ?, ?)",
-            (ogrenci, veli, telefon, tc)
-        )
+        # aynı öğrenci var mı?
+        mevcut = df_ogr[df_ogr["ad"] == ogrenci]
 
-        ogr_id = cursor.lastrowid
+        if not mevcut.empty:
+            ogr_id = mevcut["id"].values[0]
+        else:
+            cursor.execute(
+                "INSERT INTO ogrenciler (ad, veli, telefon, tc) VALUES (?, ?, ?, ?)",
+                (ogrenci, veli, telefon, tc)
+            )
+            ogr_id = cursor.lastrowid
 
+        # taksit oluştur
         if toplam > 0:
             tutar = toplam / taksit
 
@@ -85,19 +101,8 @@ with st.expander("👨‍🎓 Öğrenci + Borç Ekle", expanded=True):
         conn.commit()
         conn.close()
 
-        st.success("Kaydedildi")
+        st.success("Kayıt tamam")
         st.rerun()
-
-# ----------------- VERİLER -----------------
-conn = get_connection()
-
-df_plan = pd.read_sql("""
-SELECT o.id, ogr.ad, ogr.telefon, ogr.tc, o.vade, o.tutar, o.durum
-FROM odemeler o
-JOIN ogrenciler ogr ON o.ogrenci_id = ogr.id
-""", conn)
-
-conn.close()
 
 # ----------------- BUGÜN -----------------
 st.subheader("📅 Bugün")
@@ -106,18 +111,14 @@ if not df_plan.empty:
     df_plan["vade"] = pd.to_datetime(df_plan["vade"]).dt.date
     bugun = date.today()
 
-    df_today = df_plan[(df_plan["vade"] == bugun) & (df_plan["durum"] != "Ödendi")]
-
-    st.dataframe(df_today if not df_today.empty else pd.DataFrame())
+    st.dataframe(df_plan[(df_plan["vade"] == bugun) & (df_plan["durum"] != "Ödendi")])
 
 # ----------------- GECİKEN -----------------
 st.subheader("⏰ Gecikenler")
 
 if not df_plan.empty:
     bugun = date.today()
-    df_geciken = df_plan[(df_plan["vade"] < bugun) & (df_plan["durum"] != "Ödendi")]
-
-    st.dataframe(df_geciken if not df_geciken.empty else pd.DataFrame())
+    st.dataframe(df_plan[(df_plan["vade"] < bugun) & (df_plan["durum"] != "Ödendi")])
 
 # ----------------- TÜM TAKSİTLER -----------------
 st.subheader("📋 Tüm Taksitler")
@@ -130,17 +131,13 @@ st.subheader("💰 Tahsilat")
 
 if not df_plan.empty:
 
-    secim = st.selectbox(
-        "Seç",
-        df_plan.apply(lambda x: f"{x['ad']} | {x['vade']} | {x['tutar']}", axis=1)
-    )
+    sec_id = st.selectbox("Taksit Seç", df_plan["id"])
+
+    sec_satir = df_plan[df_plan["id"] == sec_id]
+
+    st.write(sec_satir)
 
     if st.button("Ödendi"):
-
-        sec_id = df_plan.iloc[
-            df_plan.apply(lambda x: f"{x['ad']} | {x['vade']} | {x['tutar']}", axis=1)
-            == secim
-        ]["id"].values[0]
 
         conn = get_connection()
         cursor = conn.cursor()
@@ -149,6 +146,7 @@ if not df_plan.empty:
         conn.commit()
         conn.close()
 
+        st.success("Ödeme alındı")
         st.rerun()
 
 # ----------------- ARŞİV -----------------
