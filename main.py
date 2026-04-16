@@ -9,10 +9,11 @@ st.set_page_config(page_title="Tahsilat Sistemi", layout="wide")
 def get_connection():
     return sqlite3.connect("data.db", check_same_thread=False)
 
-def create_tables():
+def fix_database():
     conn = get_connection()
     cursor = conn.cursor()
 
+    # tablo yoksa oluştur
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS ogrenciler (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -33,35 +34,36 @@ def create_tables():
     )
     """)
 
+    # eksik kolon varsa ekle
+    try:
+        cursor.execute("ALTER TABLE ogrenciler ADD COLUMN tc TEXT")
+    except:
+        pass
+
     conn.commit()
     conn.close()
 
-create_tables()
+fix_database()
 
 st.title("📊 Tahsilat Sistemi")
 
 # ----------------- ÖĞRENCİ + BORÇ -----------------
 with st.expander("👨‍🎓 Öğrenci + Borç Ekle", expanded=True):
 
-    col1, col2 = st.columns(2)
+    ogrenci = st.text_input("Öğrenci Adı")
+    veli = st.text_input("Veli Adı")
+    telefon = st.text_input("Telefon")
+    tc = st.text_input("TC Kimlik")
 
-    with col1:
-        ogrenci = st.text_input("Öğrenci Adı")
-        veli = st.text_input("Veli Adı")
-        tc = st.text_input("TC Kimlik No")
+    toplam = st.number_input("Toplam Borç", 0.0)
+    taksit = st.number_input("Taksit Sayısı", 1)
+    ilk_tarih = st.date_input("İlk Taksit Tarihi")
 
-    with col2:
-        telefon = st.text_input("Telefon")
-        toplam = st.number_input("Toplam Borç", 0.0)
-        taksit = st.number_input("Taksit Sayısı", 1)
-        ilk_tarih = st.date_input("İlk Taksit Tarihi")
-
-    if st.button("Kaydet ve Plan Oluştur"):
+    if st.button("Kaydet"):
 
         conn = get_connection()
         cursor = conn.cursor()
 
-        # öğrenci ekle
         cursor.execute(
             "INSERT INTO ogrenciler (ad, veli, telefon, tc) VALUES (?, ?, ?, ?)",
             (ogrenci, veli, telefon, tc)
@@ -69,7 +71,6 @@ with st.expander("👨‍🎓 Öğrenci + Borç Ekle", expanded=True):
 
         ogr_id = cursor.lastrowid
 
-        # taksit oluştur
         if toplam > 0:
             tutar = toplam / taksit
 
@@ -84,7 +85,7 @@ with st.expander("👨‍🎓 Öğrenci + Borç Ekle", expanded=True):
         conn.commit()
         conn.close()
 
-        st.success("Öğrenci ve borç kaydedildi!")
+        st.success("Kaydedildi")
         st.rerun()
 
 # ----------------- VERİLER -----------------
@@ -99,46 +100,30 @@ JOIN ogrenciler ogr ON o.ogrenci_id = ogr.id
 conn.close()
 
 # ----------------- BUGÜN -----------------
-st.subheader("📅 Bugün Ödemesi Olanlar")
-
-bugun = date.today()
+st.subheader("📅 Bugün")
 
 if not df_plan.empty:
     df_plan["vade"] = pd.to_datetime(df_plan["vade"]).dt.date
+    bugun = date.today()
 
     df_today = df_plan[(df_plan["vade"] == bugun) & (df_plan["durum"] != "Ödendi")]
 
-    if not df_today.empty:
-        st.dataframe(df_today)
-    else:
-        st.info("Bugün ödeme yok")
+    st.dataframe(df_today if not df_today.empty else pd.DataFrame())
 
 # ----------------- GECİKEN -----------------
 st.subheader("⏰ Gecikenler")
 
 if not df_plan.empty:
+    bugun = date.today()
     df_geciken = df_plan[(df_plan["vade"] < bugun) & (df_plan["durum"] != "Ödendi")]
 
-    if not df_geciken.empty:
-        st.dataframe(df_geciken)
-    else:
-        st.info("Geciken yok")
+    st.dataframe(df_geciken if not df_geciken.empty else pd.DataFrame())
 
 # ----------------- TÜM TAKSİTLER -----------------
 st.subheader("📋 Tüm Taksitler")
 
 if not df_plan.empty:
     st.dataframe(df_plan)
-
-# ----------------- ÖĞRENCİ DETAY -----------------
-st.subheader("👤 Öğrenci Detay")
-
-if not df_plan.empty:
-    sec = st.selectbox("Öğrenci", df_plan["ad"].unique())
-
-    detay = df_plan[df_plan["ad"] == sec].sort_values("vade")
-
-    st.dataframe(detay)
 
 # ----------------- TAHSİLAT -----------------
 st.subheader("💰 Tahsilat")
@@ -150,7 +135,7 @@ if not df_plan.empty:
         df_plan.apply(lambda x: f"{x['ad']} | {x['vade']} | {x['tutar']}", axis=1)
     )
 
-    if st.button("Ödendi Yap"):
+    if st.button("Ödendi"):
 
         sec_id = df_plan.iloc[
             df_plan.apply(lambda x: f"{x['ad']} | {x['vade']} | {x['tutar']}", axis=1)
@@ -164,16 +149,10 @@ if not df_plan.empty:
         conn.commit()
         conn.close()
 
-        st.success("Ödeme alındı")
         st.rerun()
 
 # ----------------- ARŞİV -----------------
-st.subheader("📁 Arşiv (Ödenenler)")
+st.subheader("📁 Arşiv")
 
 if not df_plan.empty:
-    ar = df_plan[df_plan["durum"] == "Ödendi"]
-
-    if not ar.empty:
-        st.dataframe(ar)
-    else:
-        st.info("Henüz ödeme yok")
+    st.dataframe(df_plan[df_plan["durum"] == "Ödendi"])
