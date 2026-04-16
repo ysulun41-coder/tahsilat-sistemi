@@ -99,19 +99,26 @@ with p1:
     st.subheader("📅 Bugünün Ödemeleri")
     if not df_plan.empty:
         b_liste = df_plan[(df_plan["vade"] == bugun) & (df_plan["durum"] != "Ödendi")]
-        st.dataframe(b_liste, use_container_width=True, hide_index=True, column_config=sutun_ayarlar) if not b_liste.empty else st.info("Bugün için ödeme yok.")
+        # KISA DEVREYİ ÇÖZEN AÇIK YAZIM ŞEKLİ:
+        if not b_liste.empty:
+            st.dataframe(b_liste, use_container_width=True, hide_index=True, column_config=sutun_ayarlar)
+        else:
+            st.info("Bugün için ödeme yok.")
 
 with p2:
     st.subheader("⏰ Geciken Ödemeler")
     if not df_plan.empty:
         g_liste = df_plan[(df_plan["vade"] < bugun) & (df_plan["durum"] != "Ödendi")]
-        st.dataframe(g_liste, use_container_width=True, hide_index=True, column_config=sutun_ayarlar) if not g_liste.empty else st.success("Gecikmiş ödeme bulunmuyor.")
+        # KISA DEVREYİ ÇÖZEN AÇIK YAZIM ŞEKLİ:
+        if not g_liste.empty:
+            st.dataframe(g_liste, use_container_width=True, hide_index=True, column_config=sutun_ayarlar)
+        else:
+            st.success("Gecikmiş ödeme bulunmuyor.")
 
-# ----------------- TAHSİLAT GİRİŞİ (SIFIR HATA GARANTİLİ) -----------------
+# ----------------- TAHSİLAT GİRİŞİ -----------------
 st.divider()
 st.subheader("💰 Tahsilat Girişi")
 
-# İŞTE KESİN ÇÖZÜM: Her işlemde arama kutusuna yeni bir kimlik verip sıfırlıyoruz
 if "arama_sayaci" not in st.session_state:
     st.session_state.arama_sayaci = 0
 
@@ -124,7 +131,6 @@ arama = st.text_input(
 if not df_plan.empty:
     df_bekliyor = df_plan[df_plan["durum"] != "Ödendi"].copy()
     
-    # Harf duyarlılığını ortadan kaldıran güvenli arama filtresi
     if arama:
         aranan = arama.strip().lower()
         df_islem = df_bekliyor[
@@ -144,7 +150,6 @@ if not df_plan.empty:
             secilen_satir = df_islem[df_islem["islem_no"] == islem_id].iloc[0]
             secilen_ogr_id = int(secilen_satir["ogr_id"])
 
-            # HESAP ÖZETİ
             kisi_tum_kayitlar = df_plan[df_plan["ogr_id"] == secilen_ogr_id]
             t_planlanan = kisi_tum_kayitlar["tutar"].sum()
             t_odenen = kisi_tum_kayitlar[kisi_tum_kayitlar["durum"] == "Ödendi"]["tutar"].sum()
@@ -166,25 +171,21 @@ if not df_plan.empty:
                 asil = float(secilen_satir["tutar"])
 
                 if tutar_giris < asil:
-                    # Eksik Ödeme
                     cursor.execute("UPDATE odemeler SET durum='Ödendi', tutar=? WHERE id=?", (tutar_giris, islem_id))
                     cursor.execute("INSERT INTO odemeler (ogrenci_id, vade, tutar, durum) VALUES (?, ?, ?, 'Bekliyor')", (secilen_ogr_id, secilen_satir["vade"], asil - tutar_giris))
                     st.session_state.islem_mesaji = "Eksik tahsilat alındı, kalan tutar yeni taksit olarak eklendi."
                 else:
-                    # Tam veya Fazla Ödeme
                     cursor.execute("UPDATE odemeler SET durum='Ödendi', tutar=? WHERE id=?", (tutar_giris, islem_id))
                     st.session_state.islem_mesaji = "Tahsilat başarıyla kaydedildi."
                 
                 conn.commit()
                 conn.close()
                 
-                # SİGORTA: Sayacı 1 artırarak arama kutusunu tamamen yenile (Kırmızı ekranı bitiren satır)
                 st.session_state.arama_sayaci += 1 
                 st.rerun()
     else:
         st.info("Aramanıza uygun bekleyen taksit bulunamadı.")
 
-# İşlem sonrası mesajı göster
 if "islem_mesaji" in st.session_state:
     st.success(st.session_state.islem_mesaji)
     del st.session_state.islem_mesaji
@@ -200,4 +201,8 @@ with t1:
 with t2:
     if not df_plan.empty:
         arsiv = df_plan[df_plan["durum"] == "Ödendi"]
-        st.dataframe(arsiv, use_container_width=True, hide_index=True, column_config=sutun_ayarlar) if not arsiv.empty else st.write("Henüz ödeme kaydı yok.")
+        # KISA DEVREYİ ÇÖZEN AÇIK YAZIM ŞEKLİ:
+        if not arsiv.empty:
+            st.dataframe(arsiv, use_container_width=True, hide_index=True, column_config=sutun_ayarlar)
+        else:
+            st.write("Henüz ödeme kaydı yok.")
