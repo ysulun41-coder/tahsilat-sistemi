@@ -46,7 +46,7 @@ def verileri_yukle():
 
 df_ogr, df_plan = verileri_yukle()
 
-# --- TABLO GÖRÜNÜM AYARLARI (PARA BİRİMİ SİGORTASI) ---
+# --- TABLO GÖRÜNÜM AYARLARI ---
 sutun_ayarlari = {
     "tutar": st.column_config.NumberColumn("Tutar", format="₺ %.2f"),
     "vade": st.column_config.DateColumn("Vade Tarihi", format="DD.MM.YYYY")
@@ -68,7 +68,6 @@ with st.expander("👨‍🎓 Yeni Öğrenci ve Borç Kaydı", expanded=False):
             y_tc = st.text_input("TC Kimlik")
         with f2:
             y_tel = st.text_input("Telefon")
-            # FORMAT EKLENDİ: format="%.2f"
             y_borc = st.number_input("Toplam Borç (TL)", min_value=0.0, step=100.0, format="%.2f")
             y_taksit = st.number_input("Taksit Sayısı", min_value=1, step=1)
         
@@ -135,7 +134,7 @@ arama = st.text_input("🔍 Öğrenci Ara (İsim veya Öğrenci ID yazın)", key
 if not df_plan.empty:
     df_islem = df_plan[df_plan["durum"] != "Ödendi"].copy()
     df_islem["ad"] = df_islem["ad"].fillna("").astype(str)
-    df_islem["ogr_id"] = df_islem["ogr_id"].astype(str)
+    df_islem["ogr_id"] = df_islem["ogr_id"].astype(str) # Burada metne çevirdik
     
     if arama:
         aranan = arama.strip()
@@ -155,61 +154,13 @@ if not df_plan.empty:
             islem_id = int(secim.split("(İşlem No: ")[1].replace(")", ""))
             satir = df_islem[df_islem["islem_no"] == islem_id].iloc[0]
             
+            # ÇÖZÜM BURADA: ID numarasını tekrar sayıya (Integer) çevirdik ki veritabanı eşleşsin.
+            ogr_id_gercek = int(satir["ogr_id"])
+            
             # --- Hesap Özeti ---
-            kisi_ozet = df_plan[df_plan["ogr_id"] == satir["ogr_id"]]
+            kisi_ozet = df_plan[df_plan["ogr_id"] == ogr_id_gercek]
             t_plan = kisi_ozet["tutar"].sum()
             t_oden = kisi_ozet[kisi_ozet["durum"] == "Ödendi"]["tutar"].sum()
             t_kalan = t_plan - t_oden
 
             st.markdown(f"### 👤 {satir['ad']} - Hesap Özeti")
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Toplam Planlanan", f"₺ {t_plan:,.2f}")
-            m2.metric("Toplam Ödenen", f"₺ {t_oden:,.2f}")
-            m3.metric("Kalan Borç", f"₺ {t_kalan:,.2f}")
-
-            st.info(f"**Seçilen Taksit:** {satir['vade']} | **Asıl Tutar:** ₺ {satir['tutar']:,.2f}")
-            
-            # FORMAT EKLENDİ: format="%.2f"
-            tutar_giris = st.number_input("Kasaya Giren Miktar (TL)", min_value=0.0, value=float(satir["tutar"]), step=50.0, format="%.2f")
-
-            if st.button("Ödemeyi Onayla ve Kasaya İşle"):
-                conn = get_connection()
-                cursor = conn.cursor()
-                asıl_tutar = float(satir["tutar"])
-
-                if tutar_giris < asıl_tutar:
-                    cursor.execute("UPDATE odemeler SET durum='Ödendi', tutar=? WHERE id=?", (tutar_giris, islem_id))
-                    fark = asıl_tutar - tutar_giris
-                    cursor.execute("INSERT INTO odemeler (ogrenci_id, vade, tutar, durum) VALUES (?, ?, ?, 'Bekliyor')", (satir["ogr_id"], satir["vade"], fark))
-                    st.session_state.islem_notu = "Eksik ödeme alındı, kalan miktar listeye yeni taksit olarak eklendi."
-                else:
-                    cursor.execute("UPDATE odemeler SET durum='Ödendi', tutar=? WHERE id=?", (tutar_giris, islem_id))
-                    st.session_state.islem_notu = "Tahsilat başarıyla kaydedildi."
-
-                conn.commit()
-                conn.close()
-                
-                st.session_state.temizle_tetik = True
-                st.rerun()
-    else:
-        st.warning("Aramanıza uygun bekleyen borç bulunamadı.")
-
-if "islem_notu" in st.session_state:
-    st.success(st.session_state.islem_notu)
-    del st.session_state.islem_notu
-
-# ----------------- LİSTELER -----------------
-st.divider()
-tab_tum, tab_arsiv = st.tabs(["📋 Tüm Kayıtlar", "📁 Ödenmiş Arşiv"])
-
-with tab_tum:
-    if not df_plan.empty:
-        st.dataframe(df_plan.sort_values(by="vade"), use_container_width=True, hide_index=True, column_config=sutun_ayarlari)
-
-with tab_arsiv:
-    if not df_plan.empty:
-        df_arsiv = df_plan[df_plan["durum"] == "Ödendi"]
-        if not df_arsiv.empty:
-            st.dataframe(df_arsiv, use_container_width=True, hide_index=True, column_config=sutun_ayarlari)
-        else:
-            st.info("Henüz ödenmiş bir kayıt yok.")
