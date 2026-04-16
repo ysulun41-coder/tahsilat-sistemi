@@ -3,6 +3,10 @@ import pandas as pd
 import sqlite3
 from datetime import datetime, timedelta, date
 import urllib.parse
+import os
+
+if os.path.exists("data.db"):
+    os.remove("data.db")
 
 st.set_page_config(page_title="Tahsilat Sistemi", layout="wide")
 
