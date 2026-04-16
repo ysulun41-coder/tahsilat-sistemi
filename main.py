@@ -6,6 +6,17 @@ from datetime import datetime, timedelta, date
 # Sayfa Genişliği ve Başlık
 st.set_page_config(page_title="Tahsilat Sistemi", layout="wide")
 
+# --- YARDIMCI FONKSİYON: Türkçe Karakter Arama Sorununu Çözer ---
+def tr_upper(text):
+    if pd.isna(text):
+        return ""
+    text = str(text)
+    harfler = { "i": "İ", "ı": "I", "ğ": "Ğ", "ü": "Ü", "ş": "Ş", "ö": "Ö", "ç": "Ç" }
+    for k, v in harfler.items():
+        text = text.replace(k, v)
+        text = text.replace(k.upper(), v)
+    return text.upper()
+
 # ----------------- VERİTABANI FONKSİYONLARI -----------------
 def get_connection():
     return sqlite3.connect("data.db", check_same_thread=False)
@@ -13,7 +24,6 @@ def get_connection():
 def fix_database():
     conn = get_connection()
     cursor = conn.cursor()
-    # Tabloları oluştur 
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS ogrenciler (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -24,7 +34,6 @@ def fix_database():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         ogrenci_id INTEGER, vade DATE, tutar REAL, durum TEXT
     )""")
-    # Eski veritabanı varsa TC sütununu ekle
     try:
         cursor.execute("ALTER TABLE ogrenciler ADD COLUMN tc TEXT")
     except:
@@ -40,7 +49,6 @@ st.title("📊 Tahsilat Sistemi")
 def verileri_yukle():
     conn = get_connection()
     df_ogr = pd.read_sql("SELECT * FROM ogrenciler", conn)
-    # Taksitler ve Öğrenci Bilgileri Birleşik
     df_plan = pd.read_sql("""
     SELECT o.id as islem_no, ogr.id as ogr_id, ogr.ad, ogr.telefon, ogr.tc, o.vade, o.tutar, o.durum
     FROM odemeler o
@@ -54,7 +62,7 @@ def verileri_yukle():
 
 df_ogr, df_plan = verileri_yukle()
 
-# ----------------- ÖĞRENCİ + BORÇ EKLEME (SIFIRLANAN FORM) -----------------
+# ----------------- ÖĞRENCİ + BORÇ EKLEME -----------------
 with st.expander("👨‍🎓 Yeni Kayıt ve Borçlandırma", expanded=False):
     if "kayit_basarili" in st.session_state:
         st.success(st.session_state.kayit_basarili)
@@ -96,7 +104,7 @@ with st.expander("👨‍🎓 Yeni Kayıt ve Borçlandırma", expanded=False):
             st.session_state.kayit_basarili = f"{ogrenci} başarıyla kaydedildi!"
             st.rerun()
 
-# ----------------- TAKİP PANELİ (BUGÜN / GECİKEN) -----------------
+# ----------------- TAKİP PANELİ -----------------
 col_bugun, col_geciken = st.columns(2)
 bugun = date.today()
 
@@ -104,32 +112,27 @@ with col_bugun:
     st.subheader("📅 Bugünün Ödemeleri")
     if not df_plan.empty:
         bugun_df = df_plan[(df_plan["vade"] == bugun) & (df_plan["durum"] != "Ödendi")]
-        if not bugun_df.empty:
-            st.dataframe(bugun_df, use_container_width=True, hide_index=True) 
-        else:
-            st.info("Bugün ödeme yok.")
+        st.dataframe(bugun_df, use_container_width=True, hide_index=True) if not bugun_df.empty else st.info("Bugün ödeme yok.")
 
 with col_geciken:
     st.subheader("⏰ Geciken Ödemeler")
     if not df_plan.empty:
         geciken_df = df_plan[(df_plan["vade"] < bugun) & (df_plan["durum"] != "Ödendi")]
-        if not geciken_df.empty:
-            st.dataframe(geciken_df, use_container_width=True, hide_index=True) 
-        else:
-            st.success("Gecikmiş ödeme yok.")
+        st.dataframe(geciken_df, use_container_width=True, hide_index=True) if not geciken_df.empty else st.success("Gecikmiş ödeme yok.")
 
-# ----------------- GELİŞMİŞ ARAMALI TAHSİLAT -----------------
+# ----------------- GELİŞMİŞ ARAMALI VE SERBEST TAHSİLAT -----------------
 st.divider()
 st.subheader("💰 Akıllı Tahsilat Ekranı")
 
-arama = st.text_input("Öğrenci Ara (İsim veya Öğrenci ID giriniz)", placeholder="Örn: Yusuf veya 41")
+arama = st.text_input("Öğrenci Ara (İsim veya Öğrenci ID giriniz)", placeholder="Örn: Oğuzhan veya 41")
 
 if not df_plan.empty:
     df_bekliyor = df_plan[df_plan["durum"] != "Ödendi"].copy()
     
     if arama:
+        arama_upper = tr_upper(arama)
         df_bekliyor = df_bekliyor[
-            (df_bekliyor['ad'].str.contains(arama, case=False, na=False, regex=False)) | 
+            df_bekliyor['ad'].apply(tr_upper).str.contains(arama_upper, regex=False) | 
             (df_bekliyor['ogr_id'].astype(str) == arama)
         ]
 
@@ -142,32 +145,66 @@ if not df_plan.empty:
         secilen_metin = st.selectbox("Tahsil edilecek taksiti seçin:", secenekler)
         
         if secilen_metin != "--- Lütfen Seçim Yapınız ---":
+            # İşlem numarasını ve o satırın verilerini alıyoruz
             secilen_islem_no = int(secilen_metin.split("(İşlem No: ")[1].replace(")", ""))
-            sec_satir = df_bekliyor[df_bekliyor["islem_no"] == secilen_islem_no]
+            sec_satir = df_bekliyor[df_bekliyor["islem_no"] == secilen_islem_no].iloc[0]
+            ogr_id_secilen = sec_satir['ogr_id']
             
-            st.warning(f"Seçilen Kişi: {sec_satir['ad'].values[0]} | Tutar: {sec_satir['tutar'].values[0]} TL")
+            # --- YENİ EKLENEN: ÖĞRENCİ BORÇ PANOSU ---
+            ogr_tum_kayitlar = df_plan[df_plan['ogr_id'] == ogr_id_secilen]
+            toplam_planlanan = ogr_tum_kayitlar['tutar'].sum()
+            toplam_odenen = ogr_tum_kayitlar[ogr_tum_kayitlar['durum'] == 'Ödendi']['tutar'].sum()
+            guncel_kalan = toplam_planlanan - toplam_odenen
+            
+            st.markdown(f"### 👤 {sec_satir['ad']} - Hesap Özeti")
+            kutu1, kutu2, kutu3 = st.columns(3)
+            kutu1.metric("Toplam Planlanan Borç", f"{toplam_planlanan:,.2f} TL")
+            kutu2.metric("Bugüne Kadar Ödenen", f"{toplam_odenen:,.2f} TL")
+            kutu3.metric("Kalan Net Borç", f"{guncel_kalan:,.2f} TL")
+            
+            st.info(f"Seçili Taksit Vadesi: **{sec_satir['vade']}** | Bekleyen Asıl Tutar: **{sec_satir['tutar']} TL**")
+            
+            # --- YENİ EKLENEN: SERBEST MİKTAR GİRİŞİ ---
+            orjinal_tutar = float(sec_satir['tutar'])
+            alinan_tutar = st.number_input("Kasaya Girecek Tahsilat Miktarı (TL):", min_value=0.0, value=orjinal_tutar, step=50.0)
             
             if st.button("Ödemeyi Onayla ve Kasaya İşle"):
                 conn = get_connection()
                 cursor = conn.cursor()
-                cursor.execute("UPDATE odemeler SET durum='Ödendi' WHERE id=?", (secilen_islem_no,))
+                
+                if alinan_tutar < orjinal_tutar:
+                    # EKSİK ÖDEME: Mevcutu ödenen kadar kapat, üstü için yeni taksit aç
+                    cursor.execute("UPDATE odemeler SET durum='Ödendi', tutar=? WHERE id=?", (alinan_tutar, secilen_islem_no))
+                    kalan_fark = orjinal_tutar - alinan_tutar
+                    cursor.execute("INSERT INTO odemeler (ogrenci_id, vade, tutar, durum) VALUES (?, ?, ?, 'Bekliyor')",
+                                   (ogr_id_secilen, sec_satir['vade'], kalan_fark))
+                    st.session_state.mesaj = f"Eksik tahsilat yapıldı! {alinan_tutar} TL alındı, kalan {kalan_fark} TL listeye yeni taksit olarak eklendi."
+                
+                elif alinan_tutar == orjinal_tutar:
+                    # TAM ÖDEME
+                    cursor.execute("UPDATE odemeler SET durum='Ödendi' WHERE id=?", (secilen_islem_no,))
+                    st.session_state.mesaj = "Tahsilat tam olarak yapıldı."
+                
+                else:
+                    # FAZLA ÖDEME: Satırı yüksek tutarla kapatır, toplam borcu otomatik aşağı çeker
+                    cursor.execute("UPDATE odemeler SET durum='Ödendi', tutar=? WHERE id=?", (alinan_tutar, secilen_islem_no))
+                    st.session_state.mesaj = f"Fazla tahsilat yapıldı! {alinan_tutar} TL olarak kaydedildi ve toplam borçtan düşüldü."
+
                 conn.commit()
                 conn.close()
-                st.success("Tahsilat yapıldı, liste güncelleniyor...")
                 st.rerun()
-    else:
-        st.info("Aramanıza uygun bekleyen taksit bulunamadı.")
+
+# Tahsilat onaylandıktan sonra mesajı ekranda göstermek için
+if "mesaj" in st.session_state:
+    st.success(st.session_state.mesaj)
+    del st.session_state.mesaj
 
 # ----------------- LİSTELER -----------------
 st.divider()
 tab1, tab2 = st.tabs(["📋 Tüm Kayıtlar", "📁 Ödenmiş Arşivi"])
-
 with tab1:
     if not df_plan.empty:
         st.dataframe(df_plan.sort_values(by="vade"), use_container_width=True, hide_index=True)
-    else:
-        st.write("Kayıt yok.")
-
 with tab2:
     if not df_plan.empty:
         st.dataframe(df_plan[df_plan["durum"] == "Ödendi"], use_container_width=True, hide_index=True)
