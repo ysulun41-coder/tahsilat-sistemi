@@ -13,17 +13,20 @@ def get_connection():
 def fix_database():
     conn = get_connection()
     cursor = conn.cursor()
+    
     # Tablo Oluşturma
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS ogrenciler (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         ad TEXT, veli TEXT, telefon TEXT, tc TEXT
     )""")
+    
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS odemeler (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         ogrenci_id INTEGER, vade DATE, tutar REAL, durum TEXT
     )""")
+    
     # TC Sütunu Kontrolü (Sigorta)
     try:
         cursor.execute("ALTER TABLE ogrenciler ADD COLUMN tc TEXT")
@@ -47,6 +50,7 @@ def verileri_yukle():
     FROM odemeler o
     JOIN ogrenciler ogr ON o.ogrenci_id = ogr.id
     """, conn)
+    
     # Tarih formatını düzenle
     if not df_plan.empty:
         df_plan["vade"] = pd.to_datetime(df_plan["vade"]).dt.date
@@ -74,7 +78,7 @@ with st.expander("👨‍🎓 Yeni Kayıt ve Borçlandırma", expanded=False):
             conn = get_connection()
             cursor = conn.cursor()
             
-            # Öğrenci var mı bak, yoksa ekle
+            # Öğrenci var mı bak, yoksa ekle (Öğrenci ID burada sabitlenir)
             mevcut = df_ogr[df_ogr["ad"] == ogrenci]
             if not mevcut.empty:
                 ogr_id = int(mevcut["id"].values[0])
@@ -83,7 +87,7 @@ with st.expander("👨‍🎓 Yeni Kayıt ve Borçlandırma", expanded=False):
                                (ogrenci, veli, telefon, tc))
                 ogr_id = cursor.lastrowid
 
-            # Taksitleri oluştur
+            # Taksitleri oluştur (Her taksite benzersiz İşlem ID'si verilir)
             tutar = toplam / taksit
             for i in range(int(taksit)):
                 vade = ilk_tarih + timedelta(days=30 * i)
@@ -120,24 +124,24 @@ with col_geciken:
         else:
             st.success("Harika! Gecikmiş ödeme bulunmuyor.")
 
-# ----------------- TAHSİLAT YAPMA (DÜZELTİLEN KISIM) -----------------
+# ----------------- TAHSİLAT YAPMA -----------------
 st.divider()
 st.subheader("💰 Elle Tahsilat Yap")
 
 if not df_plan.empty:
-    # Sadece bekleyenleri göster ki seçim kolay olsun
+    # Sadece bekleyenleri göster
     df_bekliyor = df_plan[df_plan["durum"] != "Ödendi"].copy()
     
     if not df_bekliyor.empty:
-        # Seçim listesi oluştur (Görünür isimler)
+        # Kafa karıştıran "ID" metni "İşlem No" olarak değiştirildi
         df_bekliyor["liste_metni"] = df_bekliyor.apply(
-            lambda x: f"ID: {x['id']} | {x['ad']} | Vade: {x['vade']} | Tutar: {x['tutar']} TL", axis=1
+            lambda x: f"İşlem No: {x['id']} ➔ {x['ad']} | Vade: {x['vade']} | Tutar: {x['tutar']} TL", axis=1
         )
         
         secilen_metin = st.selectbox("Tahsil edilecek taksiti seçin:", df_bekliyor["liste_metni"])
         
-        # Seçilen ID'yi metinden ayıkla
-        secilen_id = int(secilen_metin.split(" | ")[0].replace("ID: ", ""))
+        # Seçilen İşlem No'yu arka planda ayıkla
+        secilen_id = int(secilen_metin.split(" ➔ ")[0].replace("İşlem No: ", ""))
         
         # Seçilen satırın detayını göster
         sec_satir = df_bekliyor[df_bekliyor["id"] == secilen_id]
@@ -149,7 +153,7 @@ if not df_plan.empty:
             cursor.execute("UPDATE odemeler SET durum='Ödendi' WHERE id=?", (secilen_id,))
             conn.commit()
             conn.close()
-            st.success(f"ID {secilen_id} numaralı ödeme başarıyla tahsil edildi.")
+            st.success("Ödeme başarıyla tahsil edildi.")
             st.rerun()
     else:
         st.write("Tahsil edilecek bekleyen taksit kalmadı.")
