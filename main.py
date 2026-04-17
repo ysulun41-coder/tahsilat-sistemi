@@ -46,12 +46,11 @@ def ay_ekle(baslangic_tarihi, ay_sayisi):
     gun = min(baslangic_tarihi.day, calendar.monthrange(yil, ay)[1])
     return date(yil, ay, gun)
 
-# HIZ VE GÜNCELLEME DÜZELTMESİ (Bekliyor hatası için commit eklendi)
 def veri_getir(query, params=None):
     conn = get_connection()
     try:
         df = pd.read_sql(query, conn, params=params)
-        conn.commit()  # Veritabanı önbelleğini temizler, en taze veriyi okur
+        conn.commit()
         return df
     except Exception as e:
         conn.rollback()
@@ -67,66 +66,82 @@ st.title("🏫 Öğrenci Kayıt ve Tahsilat Paneli")
 
 # ----------------- 1. YENİ KAYIT VE MAKBUZ -----------------
 with st.expander("👨‍🎓 Yeni Öğrenci Kaydı ve Sözleşme Oluştur", expanded=False):
-    with st.form("kayit_formu", clear_on_submit=True):
-        c1, c2 = st.columns(2)
-        with c1:
-            y_ad = st.text_input("Öğrenci Adı Soyadı")
-            y_veli = st.text_input("Veli Adı Soyadı")
-            y_tc = st.text_input("TC Kimlik No")
-        with c2:
-            y_tel = st.text_input("Telefon")
-            y_toplam = st.number_input("Toplam Eğitim Bedeli", min_value=0.0, step=1000.0)
-            # PARA OKUNUŞU İÇİN YARDIMCI EKRAN
-            st.caption(f"**Girilen Tutarın Okunuşu:** :blue[₺ {y_toplam:,.2f}]")
-            
-            y_taksit = st.number_input("Taksit Sayısı", min_value=1, value=10)
+    # DİKKAT: Anlık para değişimi için st.form yapısını KİLİDİNDEN KURTARDIM.
+    c1, c2 = st.columns(2)
+    with c1:
+        y_ad = st.text_input("Öğrenci Adı Soyadı")
+        y_veli = st.text_input("Veli Adı Soyadı")
+        y_tc = st.text_input("TC Kimlik No", max_chars=11) # Max 11 karakter girilebilir
+    with c2:
+        y_tel = st.text_input("Telefon")
+        y_toplam = st.number_input("Toplam Eğitim Bedeli", min_value=0.0, step=1000.0)
         
-        y_tarih = st.date_input("İlk Ödeme Tarihi", value=date.today())
-        submit = st.form_submit_button("Kaydı Tamamla ve Makbuz Oluştur")
+        # ANLIK PARA OKUNUŞU (Siz yazarken değişecek)
+        st.markdown(f"**💰 Toplam Tutar:** <span style='color: green; font-size: 18px;'>₺ {y_toplam:,.2f}</span>", unsafe_allow_html=True)
+        
+        y_taksit = st.number_input("Taksit Sayısı", min_value=1, value=10)
+    
+    y_tarih = st.date_input("İlk Ödeme Tarihi", value=date.today())
+    submit = st.button("Kaydı Tamamla ve Makbuz Oluştur", type="primary")
 
-    if submit and y_ad and y_tc:
-        conn = get_connection()
-        cur = conn.cursor()
-        try:
-            cur.execute("INSERT INTO ogrenciler (ad, veli, telefon, tc) VALUES (%s, %s, %s, %s) ON CONFLICT (tc) DO UPDATE SET ad=EXCLUDED.ad RETURNING id", 
-                        (y_ad, y_veli, y_tel, y_tc))
-            ogr_id = cur.fetchone()[0]
-            
-            taksit_tutari = y_toplam / y_taksit
-            for i in range(int(y_taksit)):
-                vade = ay_ekle(y_tarih, i)
-                cur.execute("INSERT INTO odemeler (ogrenci_id, vade, tutar) VALUES (%s, %s, %s)", 
-                            (ogr_id, vade, taksit_tutari))
-            conn.commit()
-            
-            st.success(f"Kayıt Başarılı! Aşağıdaki dökümü yazdırıp veliye verebilirsiniz.")
-            
-            # Yazdırılabilir Alan
-            st.markdown(f"""
-            <div style="border: 2px solid #ccc; padding: 20px; border-radius: 10px; background-color: white; color: black;">
-                <h2 style="text-align: center;">ÖĞRENCİ KAYIT VE ÖDEME PLANI</h2>
-                <hr>
-                <p><b>Öğrenci:</b> {y_ad} &nbsp;&nbsp; <b>TC:</b> {y_tc}</p>
-                <p><b>Veli:</b> {y_veli} &nbsp;&nbsp; <b>Tel:</b> {y_tel}</p>
-                <p><b>Toplam Tutar:</b> ₺ {y_toplam:,.2f} &nbsp;&nbsp; <b>Taksit Sayısı:</b> {y_taksit}</p>
-                <table style="width: 100%; border-collapse: collapse;">
-                    <tr style="background-color: #f2f2f2;">
-                        <th style="border: 1px solid #ddd; padding: 8px;">Taksit</th>
-                        <th style="border: 1px solid #ddd; padding: 8px;">Vade</th>
-                        <th style="border: 1px solid #ddd; padding: 8px;">Tutar</th>
-                    </tr>
-                    {" ".join([f"<tr><td style='border: 1px solid #ddd; padding: 8px; text-align: center;'>{j+1}</td><td style='border: 1px solid #ddd; padding: 8px; text-align: center;'>{ay_ekle(y_tarih, j).strftime('%d.%m.%Y')}</td><td style='border: 1px solid #ddd; padding: 8px; text-align: right;'>₺ {taksit_tutari:,.2f}</td></tr>" for j in range(int(y_taksit))])}
-                </table>
-                <br>
-                <p style="text-align: right;">İmza<br><br>________________</p>
-            </div>
-            """, unsafe_allow_html=True)
-            
-        except Exception as e:
-            conn.rollback()
-            st.error(f"Hata: {e}")
-        finally:
-            cur.close()
+    if submit:
+        # TC KİMLİK GÜVENLİK DUVARI
+        if not y_ad or not y_tc:
+            st.error("🚨 Lütfen Ad Soyad ve TC Kimlik numarası alanlarını doldurun.")
+        elif len(y_tc) != 11 or not y_tc.isdigit():
+            st.error("🚨 HATA: TC Kimlik Numarası tam 11 haneli olmalı ve sadece rakamlardan oluşmalıdır!")
+        elif y_toplam <= 0:
+            st.error("🚨 HATA: Lütfen geçerli bir eğitim bedeli giriniz.")
+        else:
+            conn = get_connection()
+            cur = conn.cursor()
+            try:
+                # 1. Aşama: Mükerrer TC Kontrolü
+                cur.execute("SELECT ad FROM ogrenciler WHERE tc = %s", (y_tc,))
+                mevcut_kisi = cur.fetchone()
+                
+                if mevcut_kisi:
+                    st.error(f"🚨 HATA: {y_tc} TC numarası zaten '{mevcut_kisi[0]}' adına sisteme kayıtlı! Aynı TC ile iki kayıt açılamaz.")
+                else:
+                    # 2. Aşama: Sorun yoksa kaydet
+                    cur.execute("INSERT INTO ogrenciler (ad, veli, telefon, tc) VALUES (%s, %s, %s, %s) RETURNING id", 
+                                (y_ad, y_veli, y_tel, y_tc))
+                    ogr_id = cur.fetchone()[0]
+                    
+                    taksit_tutari = y_toplam / y_taksit
+                    for i in range(int(y_taksit)):
+                        vade = ay_ekle(y_tarih, i)
+                        cur.execute("INSERT INTO odemeler (ogrenci_id, vade, tutar) VALUES (%s, %s, %s)", 
+                                    (ogr_id, vade, taksit_tutari))
+                    conn.commit()
+                    
+                    st.success(f"Kayıt Başarılı! Aşağıdaki dökümü yazdırıp veliye verebilirsiniz.")
+                    
+                    # Yazdırılabilir Alan
+                    st.markdown(f"""
+                    <div style="border: 2px solid #ccc; padding: 20px; border-radius: 10px; background-color: white; color: black;">
+                        <h2 style="text-align: center;">ÖĞRENCİ KAYIT VE ÖDEME PLANI</h2>
+                        <hr>
+                        <p><b>Öğrenci:</b> {y_ad} &nbsp;&nbsp; <b>TC:</b> {y_tc}</p>
+                        <p><b>Veli:</b> {y_veli} &nbsp;&nbsp; <b>Tel:</b> {y_tel}</p>
+                        <p><b>Toplam Tutar:</b> ₺ {y_toplam:,.2f} &nbsp;&nbsp; <b>Taksit Sayısı:</b> {y_taksit}</p>
+                        <table style="width: 100%; border-collapse: collapse;">
+                            <tr style="background-color: #f2f2f2;">
+                                <th style="border: 1px solid #ddd; padding: 8px;">Taksit</th>
+                                <th style="border: 1px solid #ddd; padding: 8px;">Vade</th>
+                                <th style="border: 1px solid #ddd; padding: 8px;">Tutar</th>
+                            </tr>
+                            {" ".join([f"<tr><td style='border: 1px solid #ddd; padding: 8px; text-align: center;'>{j+1}</td><td style='border: 1px solid #ddd; padding: 8px; text-align: center;'>{ay_ekle(y_tarih, j).strftime('%d.%m.%Y')}</td><td style='border: 1px solid #ddd; padding: 8px; text-align: right;'>₺ {taksit_tutari:,.2f}</td></tr>" for j in range(int(y_taksit))])}
+                        </table>
+                        <br>
+                        <p style="text-align: right;">İmza<br><br>________________</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+            except Exception as e:
+                conn.rollback()
+                st.error(f"Sistemsel Hata: {e}")
+            finally:
+                cur.close()
 
 # ----------------- 2. DETAYLI TAHSİLAT VE ÖĞRENCİ KARTI -----------------
 st.divider()
@@ -140,7 +155,7 @@ if arama:
     if not ogr_df.empty:
         secilen_ogr_id = ogr_df.iloc[0]['id']
         secilen_ogr_ad = ogr_df.iloc[0]['ad']
-        secilen_ogr_tc = ogr_df.iloc[0]['tc'] # TC EKLENDİ
+        secilen_ogr_tc = ogr_df.iloc[0]['tc'] 
         
         kart_df = veri_getir("""
             SELECT id as islem_no, vade, tutar, durum 
@@ -153,7 +168,6 @@ if arama:
         t_odenen = kart_df[kart_df['durum'] == 'Ödendi']['tutar'].sum()
         t_kalan = t_borc - t_odenen
         
-        # TC KİMLİK KART BAŞLIĞINA EKLENDİ
         st.markdown(f"### 📋 {secilen_ogr_ad} | TC: {secilen_ogr_tc}")
         m1, m2, m3 = st.columns(3)
         m1.metric("Toplam Kayıt Bedeli", f"₺ {t_borc:,.2f}")
@@ -175,10 +189,11 @@ if arama:
             vade_tarihi = bekleyenler[bekleyenler['islem_no'] == islem_id]['vade'].values[0]
 
             tutar_giris = st.number_input("Kasaya Giren Miktar", min_value=0.0, max_value=asil_tutar, value=asil_tutar, step=500.0)
-            # PARA OKUNUŞU İÇİN YARDIMCI EKRAN
-            st.caption(f"**Kasaya İşlenecek Net Tutar:** :green[₺ {tutar_giris:,.2f}]")
             
-            if st.button("Tahsilatı Kesinleştir"):
+            # ANLIK PARA OKUNUŞU (Siz yazarken değişecek)
+            st.markdown(f"**💰 Kasaya İşlenecek Net Tutar:** <span style='color: green; font-size: 18px;'>₺ {tutar_giris:,.2f}</span>", unsafe_allow_html=True)
+            
+            if st.button("Tahsilatı Kesinleştir", type="primary"):
                 conn = get_connection()
                 cur = conn.cursor()
                 try:
