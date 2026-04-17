@@ -9,7 +9,7 @@ import time
 st.set_page_config(page_title="Okul Tahsilat Sistemi", layout="wide")
 
 
-APP_PASSWORD = "1234"  # ← buraya şifreni yaz
+APP_PASSWORD = "12583769"  # ← buraya şifreni yaz
 
 def check_password():
     if "giris_yapildi" not in st.session_state:
