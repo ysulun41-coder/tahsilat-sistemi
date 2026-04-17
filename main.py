@@ -7,6 +7,27 @@ import time
 
 # Sayfa Ayarları
 st.set_page_config(page_title="Okul Tahsilat Sistemi", layout="wide")
+
+
+APP_PASSWORD = "1234"  # ← buraya şifreni yaz
+
+def check_password():
+    if "giris_yapildi" not in st.session_state:
+        st.session_state.giris_yapildi = False
+
+    if not st.session_state.giris_yapildi:
+        sifre = st.text_input("🔐 Şifre", type="password")
+
+        if st.button("Giriş Yap"):
+            if sifre == APP_PASSWORD:
+                st.session_state.giris_yapildi = True
+                st.rerun()
+            else:
+                st.error("❌ Şifre yanlış")
+
+        st.stop()
+
+check_password()
 # Kodu en başa, st.set_page_config'den hemen sonra ekle
 bakim_modu = False  # Erişimi açmak istediğinde False yapman yeterli
 
