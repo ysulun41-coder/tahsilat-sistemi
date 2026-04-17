@@ -375,7 +375,7 @@ with st.expander("⚙️ Sistem Yöneticisi Araçları (Hata Korumalı Aktarım)
                 if conn is not None: conn.rollback()
                 st.error(f"🚨 Aktarım Hatası: {e}")
             finally:
-                if 'cur' in locals(): cur.close()
+               
 
 st.write("---")
     st.write("#### ⚠️ Sistemi Sıfırla")
@@ -393,7 +393,6 @@ st.write("---")
                 conn.rollback()
             st.error(f"Hata: {e}")
         finally:
-            if 'cur' in locals():
-                cur.close()
+            if 'cur' in locals(): cur.close()
 
 
