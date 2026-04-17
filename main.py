@@ -15,7 +15,7 @@ if bakim_modu:
     st.info("Lütfen daha sonra tekrar deneyiniz.")
     st.stop()  # Bu komut, alttaki hiçbir kodun çalışmamasını sağlar
 
-import streamlit as st
+
 
 def check_password():
     def password_entered():
