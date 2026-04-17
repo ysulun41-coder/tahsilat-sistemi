@@ -277,6 +277,7 @@ if not df_takip.empty:
 else:
     st.success("Harika! Günü gelen veya geciken bekleyen ödeme yok.")
 
+
 # ----------------- SİSTEM YÖNETİCİSİ ARAÇLARI (GEÇİCİ) -----------------
 st.divider()
 with st.expander("⚙️ Sistem Yöneticisi Araçları (Özel Excel Yükleme & Sıfırlama)", expanded=False):
@@ -286,15 +287,15 @@ with st.expander("⚙️ Sistem Yöneticisi Araçları (Özel Excel Yükleme & S
     
     if st.button("🚀 Excel Verilerini Sisteme Aktar"):
         if yuklenen_dosya is not None:
+            conn = None # BAĞLANTIYI GÜVENLİ BAŞLAT (NameError hatasını çözer)
             try:
-                # 1. DOSYA OKUMA GÜVENLİK ZIRHI (Noktalı Virgül ve TC Koruması)
+                # 1. DOSYA OKUMA GÜVENLİK ZIRHI
                 if yuklenen_dosya.name.endswith('.csv'):
                     try:
-                        # Önce normal virgül dene, tüm veriyi metin (string) olarak al ki TC'ler bozulmasın
                         df_excel = pd.read_csv(yuklenen_dosya, dtype=str)
-                        if len(df_excel.columns) == 1: # Eğer sütunları ayıramadıysa (tek sütun yaptıysa)
+                        if len(df_excel.columns) == 1: 
                             yuklenen_dosya.seek(0)
-                            df_excel = pd.read_csv(yuklenen_dosya, sep=';', dtype=str) # Noktalı virgülle tekrar dene
+                            df_excel = pd.read_csv(yuklenen_dosya, sep=';', dtype=str) 
                     except:
                         yuklenen_dosya.seek(0)
                         df_excel = pd.read_csv(yuklenen_dosya, sep=';', dtype=str)
@@ -304,13 +305,12 @@ with st.expander("⚙️ Sistem Yöneticisi Araçları (Özel Excel Yükleme & S
                 # Başlıkları temizle
                 df_excel.columns = df_excel.columns.str.strip()
                 
-                # GÜVENLİK KONTROLÜ: Sütun gerçekten var mı? Yoksa hatayı net söyle!
+                # GÜVENLİK KONTROLÜ
                 aranan_sutun = 'Öğr. TC Kimlik No'
                 if aranan_sutun not in df_excel.columns:
                     st.error(f"🚨 HATA: Dosyada '{aranan_sutun}' sütunu bulunamadı! Bulunan sütunlar şunlar: {', '.join(df_excel.columns)}")
                     st.stop()
                 
-                # Boş satırları at
                 df_excel = df_excel.dropna(subset=[aranan_sutun])
                 
                 conn = get_connection()
@@ -321,7 +321,6 @@ with st.expander("⚙️ Sistem Yöneticisi Araçları (Özel Excel Yükleme & S
                 total_rows = len(df_excel)
                 
                 for index, row in df_excel.iterrows():
-                    # --- Veri Temizliği ---
                     tc_no = str(row[aranan_sutun]).strip().replace('.0', '')
                     ad = str(row['Öğrencinin Adı Soyadı']).strip()
                     veli = "-" 
@@ -344,7 +343,6 @@ with st.expander("⚙️ Sistem Yöneticisi Araçları (Özel Excel Yükleme & S
                     else:
                         durum = 'Bekliyor'
                     
-                    # --- Veritabanına Yaz ---
                     cur.execute("""
                         INSERT INTO ogrenciler (ad, veli, telefon, tc) 
                         VALUES (%s, %s, %s, %s) 
@@ -366,7 +364,9 @@ with st.expander("⚙️ Sistem Yöneticisi Araçları (Özel Excel Yükleme & S
                 st.info("Lütfen verilerin yüklenmesi için sayfayı yenileyin (F5).")
                 
             except Exception as e:
-                conn.rollback()
+                # EĞER BAĞLANTI VARSA İPTAL ET (NameError almamak için kalkanımız)
+                if conn is not None:
+                    conn.rollback()
                 st.error(f"🚨 Aktarım Hatası: {e}")
             finally:
                 if 'cur' in locals():
@@ -377,14 +377,18 @@ with st.expander("⚙️ Sistem Yöneticisi Araçları (Özel Excel Yükleme & S
     st.write("---")
     st.write("#### ⚠️ Sistemi Sıfırla")
     if st.button("🚨 TÜM VERİTABANINI SİLK BAŞTAN SIFIRLA"):
-        conn = get_connection()
-        cur = conn.cursor()
+        conn = None
         try:
+            conn = get_connection()
+            cur = conn.cursor()
             cur.execute("DROP TABLE IF EXISTS odemeler CASCADE;")
             cur.execute("DROP TABLE IF EXISTS ogrenciler CASCADE;")
             conn.commit()
             st.success("Veritabanı sıfırlandı. Lütfen sayfayı yenileyin (F5).")
         except Exception as e:
+            if conn is not None:
+                conn.rollback()
             st.error(f"Hata: {e}")
         finally:
-            cur.close()
+            if 'cur' in locals():
+                cur.close()
