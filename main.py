@@ -267,3 +267,19 @@ if not df_takip.empty:
     st.dataframe(df_takip, use_container_width=True, hide_index=True, column_config=sutun_ayarlar)
 else:
     st.success("Harika! Günü gelen veya geciken bekleyen ödeme yok.")
+    # ----------------- TEHLİKELİ BÖLGE: SIFIRLAMA BUTONU -----------------
+st.divider()
+st.error("⚠️ SİSTEM SIFIRLAMA (SADECE TEST İÇİN)")
+if st.button("🚨 TÜM VERİTABANINI SİLK BAŞTAN SIFIRLA"):
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        # CASCADE komutu, birbirine bağlı tabloları (öğrenci silinince taksitlerini de) kökten temizler
+        cur.execute("DROP TABLE IF EXISTS odemeler CASCADE;")
+        cur.execute("DROP TABLE IF EXISTS ogrenciler CASCADE;")
+        conn.commit()
+        st.success("Tebrikler! Veritabanı fabrikadan ilk çıktığı güne döndü. Lütfen sayfayı yenileyin (F5).")
+    except Exception as e:
+        st.error(f"Hata: {e}")
+    finally:
+        cur.close()
