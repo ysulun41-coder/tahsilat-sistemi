@@ -16,7 +16,6 @@ def get_connection():
 def init_db():
     conn = get_connection()
     cur = conn.cursor()
-    # Temel Tablolar
     cur.execute("""
         CREATE TABLE IF NOT EXISTS ogrenciler (
             id SERIAL PRIMARY KEY,
@@ -36,7 +35,6 @@ def init_db():
         )
     """)
     
-    # YENİ SÜTUNLARI OTOMATİK EKLE (Eski verileri bozmadan)
     try:
         cur.execute("ALTER TABLE odemeler ADD COLUMN IF NOT EXISTS odeme_yontemi TEXT")
         cur.execute("ALTER TABLE odemeler ADD COLUMN IF NOT EXISTS makbuz_no TEXT")
@@ -48,7 +46,6 @@ def init_db():
 
 init_db()
 
-# Tarih yardımcı fonksiyonu
 def ay_ekle(baslangic_tarihi, ay_sayisi):
     ay = baslangic_tarihi.month - 1 + ay_sayisi
     yil = baslangic_tarihi.year + ay // 12
@@ -66,7 +63,6 @@ def veri_getir(query, params=None):
         conn.rollback()
         return pd.DataFrame()
 
-# Görünüm Ayarları
 sutun_ayarlar = {
     "tutar": st.column_config.NumberColumn("Tutar", format="₺ %.2f"),
     "vade": st.column_config.DateColumn("Vade Tarihi", format="DD.MM.YYYY")
@@ -138,13 +134,16 @@ if arama:
         secilen_ogr_ad = ogr_df.iloc[0]['ad']
         secilen_ogr_tc = ogr_df.iloc[0]['tc'] 
         
-        # Tüm işlemleri getir
         kart_df = veri_getir("""
             SELECT id as islem_no, vade, tutar, durum, odeme_yontemi, makbuz_no 
             FROM odemeler 
             WHERE ogrenci_id = %s 
             ORDER BY vade ASC
         """, (secilen_ogr_id,))
+        
+        # ESKİ KAYITLAR İÇİN GÜVENLİK YAMASI (NaN Hatalarını Önler)
+        kart_df['odeme_yontemi'] = kart_df['odeme_yontemi'].fillna("Belirtilmemiş")
+        kart_df['makbuz_no'] = kart_df['makbuz_no'].fillna("Eski_Kayit")
         
         t_borc = kart_df['tutar'].sum()
         t_odenen = kart_df[kart_df['durum'] == 'Ödendi']['tutar'].sum()
@@ -157,11 +156,7 @@ if arama:
         m3.metric("Kalan Borç", f"₺ {t_kalan:,.2f}", delta="-₺ "+str(t_odenen))
 
         st.write("**Tüm Taksit ve İşlem Geçmişi:**")
-        # DataFrame görünümünü zenginleştir
-        gosterim_df = kart_df.copy()
-        gosterim_df['odeme_yontemi'].fillna("-", inplace=True)
-        gosterim_df['makbuz_no'].fillna("-", inplace=True)
-        st.dataframe(gosterim_df, use_container_width=True, hide_index=True, column_config=sutun_ayarlar)
+        st.dataframe(kart_df, use_container_width=True, hide_index=True, column_config=sutun_ayarlar)
 
         # ----------------- YENİ ÖDEME ALMA BÖLÜMÜ -----------------
         bekleyenler = kart_df[kart_df['durum'] == 'Bekliyor']
@@ -182,28 +177,24 @@ if arama:
                     st.markdown(f"**💰 Net Tutar:** <span style='color: green; font-size: 16px;'>₺ {tutar_giris:,.2f}</span>", unsafe_allow_html=True)
                 
                 if st.button("Tahsilatı Kesinleştir ve Makbuz Üret", type="primary"):
-                    # Benzersiz Makbuz Numarası Üretme
                     yeni_makbuz_no = f"MKBZ-{datetime.now().strftime('%Y%m%d')}-{islem_id}"
                     
                     conn = get_connection()
                     cur = conn.cursor()
                     try:
                         if tutar_giris < asil_tutar:
-                            # Kısmi Ödeme
                             cur.execute("UPDATE odemeler SET durum='Ödendi', tutar=%s, odeme_yontemi=%s, makbuz_no=%s WHERE id=%s", 
                                         (tutar_giris, yontem, yeni_makbuz_no, islem_id))
-                            # Kalanı bekleme listesine ekle
                             cur.execute("INSERT INTO odemeler (ogrenci_id, vade, tutar) VALUES (%s, %s, %s)", 
                                         (secilen_ogr_id, bekleyenler[bekleyenler['islem_no'] == islem_id]['vade'].values[0], asil_tutar - tutar_giris))
                         else:
-                            # Tam Ödeme
                             cur.execute("UPDATE odemeler SET durum='Ödendi', odeme_yontemi=%s, makbuz_no=%s WHERE id=%s", 
                                         (yontem, yeni_makbuz_no, islem_id))
                         
                         conn.commit()
-                        st.session_state.goster_makbuz = yeni_makbuz_no # Makbuzu hemen ekrana basmak için hafızaya al
+                        st.session_state.goster_islem_id = islem_id # Makbuzu garantili bulmak için ID'yi hafızaya alıyoruz
                         st.success("Ödeme başarıyla işlendi!")
-                        time.sleep(1) # Kullanıcı mesajı görsün diye hafif bekleme
+                        time.sleep(1)
                         st.rerun()
                     except Exception as e:
                         conn.rollback()
@@ -211,23 +202,28 @@ if arama:
                     finally:
                         cur.close()
         else:
-            st.success("Bu öğrencinin bekleyen borcu bulunmamaktadır. Harika!")
+            st.success("Bu öğrencinin bekleyen borcu bulunmamaktadır.")
 
         # ----------------- GEÇMİŞ MAKBUZ GÖRÜNTÜLEME BÖLÜMÜ -----------------
         odenmisler = kart_df[kart_df['durum'] == 'Ödendi']
         if not odenmisler.empty:
             st.write("#### 🖨️ Makbuz Yazdır")
-            makbuz_secim = st.selectbox("Görüntülemek istediğiniz işlemi seçin:", 
-                                        odenmisler.apply(lambda x: f"{x['makbuz_no']} - {x['vade']} - ₺{x['tutar']} ({x['odeme_yontemi']})", axis=1).tolist())
             
-            # Seçilen makbuzun detaylarını bul
-            secilen_makbuz_no = makbuz_secim.split(" - ")[0]
-            makbuz_detay = odenmisler[odenmisler['makbuz_no'] == secilen_makbuz_no].iloc[0]
+            # Seçim kutusu artık kırılmaz "İşlem No" tabanlı
+            makbuz_secim = st.selectbox(
+                "Görüntülemek istediğiniz işlemi seçin:", 
+                odenmisler.apply(lambda x: f"İşlem No: {x['islem_no']} | {x['makbuz_no']} - Vade: {x['vade']} - ₺{x['tutar']} ({x['odeme_yontemi']})", axis=1).tolist()
+            )
             
-            # Eğer yeni ödeme yapıldıysa otomatik o makbuzu göster
-            if "goster_makbuz" in st.session_state:
-                makbuz_detay = odenmisler[odenmisler['makbuz_no'] == st.session_state.goster_makbuz].iloc[0]
-                del st.session_state.goster_makbuz
+            # Seçilen işlemin ID'sini güvenli şekilde ayıkla
+            secilen_islem_no = int(makbuz_secim.split("İşlem No: ")[1].split(" |")[0])
+            makbuz_detay = odenmisler[odenmisler['islem_no'] == secilen_islem_no].iloc[0]
+            
+            # Yeni ödeme yapıldıysa otomatik o fişi göster
+            if "goster_islem_id" in st.session_state:
+                # Hafızadaki ID'yi kullanarak tam nokta atışı makbuzu bul
+                makbuz_detay = odenmisler[odenmisler['islem_no'] == st.session_state.goster_islem_id].iloc[0]
+                del st.session_state.goster_islem_id
                 st.info("İşleminiz tamamlandı. Aşağıdan makbuzunuzu yazdırabilirsiniz.")
 
             # HTML Makbuz Şablonu
@@ -258,7 +254,7 @@ if arama:
     else:
         st.warning("Öğrenci bulunamadı. Lütfen ismi veya TC'yi doğru girdiğinizden emin olun.")
 
-# ----------------- 3. GÜNLÜK TAKİP (Arşiv Kaldırıldı) -----------------
+# ----------------- 3. GÜNLÜK TAKİP -----------------
 st.divider()
 st.subheader("📅 Günlük Ödeme Takip Ekranı")
 df_takip = veri_getir("""
