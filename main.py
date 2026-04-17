@@ -376,3 +376,24 @@ with st.expander("⚙️ Sistem Yöneticisi Araçları (Hata Korumalı Aktarım)
                 st.error(f"🚨 Aktarım Hatası: {e}")
             finally:
                 if 'cur' in locals(): cur.close()
+
+st.write("---")
+    st.write("#### ⚠️ Sistemi Sıfırla")
+    if st.button("🚨 TÜM VERİTABANINI SİLK BAŞTAN SIFIRLA"):
+        conn = None
+        try:
+            conn = get_connection()
+            cur = conn.cursor()
+            cur.execute("DROP TABLE IF EXISTS odemeler CASCADE;")
+            cur.execute("DROP TABLE IF EXISTS ogrenciler CASCADE;")
+            conn.commit()
+            st.success("Veritabanı sıfırlandı. Lütfen sayfayı yenileyin (F5).")
+        except Exception as e:
+            if conn is not None:
+                conn.rollback()
+            st.error(f"Hata: {e}")
+        finally:
+            if 'cur' in locals():
+                cur.close()
+
+
