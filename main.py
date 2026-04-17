@@ -281,70 +281,70 @@ else:
 st.divider()
 with st.expander("⚙️ Sistem Yöneticisi Araçları (Özel Excel Yükleme & Sıfırlama)", expanded=False):
     st.write("#### 📂 'Hiloş Tahsilat' Şablonu ile Toplu Veri Aktarımı")
-    st.info("Bu araç, yüklediğiniz 'hiloş tahsilat-taslak' formatındaki Excel/CSV dosyasını okumak üzere özel ayarlanmıştır.")
     
     yuklenen_dosya = st.file_uploader("Orijinal Excel veya CSV Dosyanızı Yükleyin", type=["xlsx", "xls", "csv"])
     
     if st.button("🚀 Excel Verilerini Sisteme Aktar"):
         if yuklenen_dosya is not None:
             try:
-                # 1. Dosya Formatını Anla ve Oku
+                # 1. DOSYA OKUMA GÜVENLİK ZIRHI (Noktalı Virgül ve TC Koruması)
                 if yuklenen_dosya.name.endswith('.csv'):
-                    df_excel = pd.read_csv(yuklenen_dosya)
+                    try:
+                        # Önce normal virgül dene, tüm veriyi metin (string) olarak al ki TC'ler bozulmasın
+                        df_excel = pd.read_csv(yuklenen_dosya, dtype=str)
+                        if len(df_excel.columns) == 1: # Eğer sütunları ayıramadıysa (tek sütun yaptıysa)
+                            yuklenen_dosya.seek(0)
+                            df_excel = pd.read_csv(yuklenen_dosya, sep=';', dtype=str) # Noktalı virgülle tekrar dene
+                    except:
+                        yuklenen_dosya.seek(0)
+                        df_excel = pd.read_csv(yuklenen_dosya, sep=';', dtype=str)
                 else:
-                    df_excel = pd.read_excel(yuklenen_dosya)
+                    df_excel = pd.read_excel(yuklenen_dosya, dtype=str)
                 
-                # Sütun isimlerinin başındaki/sonundaki gizli boşlukları temizle
+                # Başlıkları temizle
                 df_excel.columns = df_excel.columns.str.strip()
                 
-                # TC Kimlik numarası boş olan gereksiz satırları (toplam satırları vs.) at
-                if 'Öğr. TC Kimlik No' in df_excel.columns:
-                    df_excel = df_excel.dropna(subset=['Öğr. TC Kimlik No'])
-                else:
-                    st.error("Dosyada 'Öğr. TC Kimlik No' sütunu bulunamadı! Lütfen doğru dosyayı yüklediğinizden emin olun.")
+                # GÜVENLİK KONTROLÜ: Sütun gerçekten var mı? Yoksa hatayı net söyle!
+                aranan_sutun = 'Öğr. TC Kimlik No'
+                if aranan_sutun not in df_excel.columns:
+                    st.error(f"🚨 HATA: Dosyada '{aranan_sutun}' sütunu bulunamadı! Bulunan sütunlar şunlar: {', '.join(df_excel.columns)}")
                     st.stop()
+                
+                # Boş satırları at
+                df_excel = df_excel.dropna(subset=[aranan_sutun])
                 
                 conn = get_connection()
                 cur = conn.cursor()
                 islem_sayisi = 0
                 
-                # İlerlemeyi göstermek için görsel bar
                 progress_bar = st.progress(0)
                 total_rows = len(df_excel)
                 
                 for index, row in df_excel.iterrows():
-                    # --- Veri Temizliği ve Eşleştirme ---
-                    # TC'deki virgülden sonrasını sil ve metne çevir (Örn: 1234.0 -> 1234)
-                    tc_no = str(row['Öğr. TC Kimlik No']).strip().replace('.0', '')
+                    # --- Veri Temizliği ---
+                    tc_no = str(row[aranan_sutun]).strip().replace('.0', '')
                     ad = str(row['Öğrencinin Adı Soyadı']).strip()
-                    
-                    # Bu Excel'de Veli ve Telefon yok, o yüzden şimdilik boş atıyoruz
                     veli = "-" 
                     telefon = "-"
                     
-                    # Tarih formatını temizle
                     try:
                         vade_tarihi = pd.to_datetime(row['Vade Tarihi']).date()
                     except:
-                        vade_tarihi = date.today() # Eğer tarih bozuksa bugünü atar
+                        vade_tarihi = date.today()
                         
-                    # Tutar kısmındaki virgülleri noktaya çevir ki matematik şaşmasın
                     tutar_str = str(row['Ödeme Tutarı']).replace(',', '.').replace('₺', '').strip()
                     try:
                         tutar = float(tutar_str)
                     except:
                         tutar = 0.0
                     
-                    # Ödendi mi kontrolü
                     durum_ham = str(row['Ödeme Gerçekleşti mi?']).strip().lower()
-                    # Eğer excel'de "evet", "ödendi", "e" vs yazıyorsa "Ödendi" say
-                    if durum_ham in ['evet', 'ödendi', 'e', 'true', '1']:
+                    if durum_ham in ['evet', 'ödendi', 'e', 'true', '1', 'var']:
                         durum = 'Ödendi'
                     else:
                         durum = 'Bekliyor'
                     
-                    # --- Veritabanı İşlemleri ---
-                    # 1. Öğrenciyi Kaydet (Zaten varsa sadece ismini günceller, hata vermez)
+                    # --- Veritabanına Yaz ---
                     cur.execute("""
                         INSERT INTO ogrenciler (ad, veli, telefon, tc) 
                         VALUES (%s, %s, %s, %s) 
@@ -353,26 +353,24 @@ with st.expander("⚙️ Sistem Yöneticisi Araçları (Özel Excel Yükleme & S
                     """, (ad, veli, telefon, tc_no))
                     ogr_id = cur.fetchone()[0]
                     
-                    # 2. Taksiti (Sırada bekleyen işlemi) Kaydet
-                    # Not: "odeme_yontemi" ve "makbuz_no" değerlerini eski kayıt olarak işaretliyoruz
                     cur.execute("""
                         INSERT INTO odemeler (ogrenci_id, vade, tutar, durum, odeme_yontemi, makbuz_no) 
                         VALUES (%s, %s, %s, %s, 'Aktarım', 'Excel_Aktarim')
                     """, (ogr_id, vade_tarihi, tutar, durum))
                     
                     islem_sayisi += 1
-                    # Progress bar'ı güncelle
                     progress_bar.progress(int((islem_sayisi / total_rows) * 100))
                 
                 conn.commit()
-                st.success(f"🎉 MUHTEŞEM! {islem_sayisi} adet taksit işlemi (Ödenenler ve Bekleyenler dahil) sisteme hatasız aktarıldı.")
+                st.success(f"🎉 MUHTEŞEM! {islem_sayisi} adet taksit işlemi sisteme hatasız aktarıldı.")
                 st.info("Lütfen verilerin yüklenmesi için sayfayı yenileyin (F5).")
                 
             except Exception as e:
                 conn.rollback()
-                st.error(f"Aktarım Hatası: Lütfen Excel'deki verilerde (özellikle tarihlerde) bozukluk olmadığını kontrol edin. Hata Kodu: {e}")
+                st.error(f"🚨 Aktarım Hatası: {e}")
             finally:
-                cur.close()
+                if 'cur' in locals():
+                    cur.close()
         else:
             st.warning("Lütfen önce dosya seçin.")
 
