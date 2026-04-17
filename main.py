@@ -34,13 +34,11 @@ def init_db():
             durum TEXT DEFAULT 'Bekliyor'
         )
     """)
-    
     try:
         cur.execute("ALTER TABLE odemeler ADD COLUMN IF NOT EXISTS odeme_yontemi TEXT")
         cur.execute("ALTER TABLE odemeler ADD COLUMN IF NOT EXISTS makbuz_no TEXT")
     except:
         pass
-        
     conn.commit()
     cur.close()
 
@@ -70,6 +68,20 @@ sutun_ayarlar = {
 
 st.title("🏫 Öğrenci Kayıt ve Tahsilat Paneli")
 
+# ----------------- FİNANSAL KOKPİT (İLK GİRİŞ EKRANI) -----------------
+ozet_df = veri_getir("SELECT tutar, durum FROM odemeler")
+if not ozet_df.empty:
+    toplam_bekleyen = ozet_df[ozet_df['durum'] == 'Bekliyor']['tutar'].sum()
+    toplam_odenen = ozet_df[ozet_df['durum'] == 'Ödendi']['tutar'].sum()
+    genel_hedef = toplam_bekleyen + toplam_odenen
+    
+    st.markdown("### 📊 Genel Finans Durumu")
+    g1, g2, g3 = st.columns(3)
+    g1.metric("Eğitim Sözleşmeleri Toplamı", f"₺ {genel_hedef:,.2f}")
+    g2.metric("Kasaya Giren (Tahsil Edilen)", f"₺ {toplam_odenen:,.2f}")
+    g3.metric("Dışarıda Bekleyen Alacak", f"₺ {toplam_bekleyen:,.2f}")
+st.divider()
+
 # ----------------- 1. YENİ KAYIT VE SÖZLEŞME -----------------
 with st.expander("👨‍🎓 Yeni Öğrenci Kaydı ve Sözleşme Oluştur", expanded=False):
     c1, c2 = st.columns(2)
@@ -98,10 +110,8 @@ with st.expander("👨‍🎓 Yeni Öğrenci Kaydı ve Sözleşme Oluştur", exp
             cur = conn.cursor()
             try:
                 cur.execute("SELECT ad FROM ogrenciler WHERE tc = %s", (y_tc,))
-                mevcut_kisi = cur.fetchone()
-                
-                if mevcut_kisi:
-                    st.error(f"🚨 HATA: {y_tc} TC numarası zaten '{mevcut_kisi[0]}' adına kayıtlı!")
+                if cur.fetchone():
+                    st.error("🚨 HATA: Bu TC numarası zaten kayıtlı!")
                 else:
                     cur.execute("INSERT INTO ogrenciler (ad, veli, telefon, tc) VALUES (%s, %s, %s, %s) RETURNING id", 
                                 (y_ad, y_veli, y_tel, y_tc))
@@ -114,6 +124,8 @@ with st.expander("👨‍🎓 Yeni Öğrenci Kaydı ve Sözleşme Oluştur", exp
                                     (ogr_id, vade, taksit_tutari))
                     conn.commit()
                     st.success("Kayıt Başarılı!")
+                    time.sleep(1)
+                    st.rerun()
             except Exception as e:
                 conn.rollback()
                 st.error(f"Sistemsel Hata: {e}")
@@ -124,15 +136,23 @@ with st.expander("👨‍🎓 Yeni Öğrenci Kaydı ve Sözleşme Oluştur", exp
 st.divider()
 st.subheader("💰 Tahsilat İşlemi ve Öğrenci Kartı")
 
-arama = st.text_input("🔍 Öğrenci Bul (Ad veya TC giriniz)")
+# YENİ NESİL AKILLI ARAMA (Yazarken Filtreler)
+tum_ogrenciler = veri_getir("SELECT id, ad, tc FROM ogrenciler ORDER BY ad ASC")
 
-if arama:
-    ogr_df = veri_getir("SELECT * FROM ogrenciler WHERE ad ILIKE %s OR tc LIKE %s", (f"%{arama}%", f"%{arama}%"))
+if not tum_ogrenciler.empty:
+    # Öğrencileri listeye dönüştür (Örn: "Ahmet Yılmaz | TC: 123... | ID:5")
+    ogrenci_listesi = tum_ogrenciler.apply(lambda x: f"{x['ad']} | TC: {x['tc']} | ID:{x['id']}", axis=1).tolist()
     
-    if not ogr_df.empty:
-        secilen_ogr_id = int(ogr_df.iloc[0]['id'])
-        secilen_ogr_ad = ogr_df.iloc[0]['ad']
-        secilen_ogr_tc = ogr_df.iloc[0]['tc'] 
+    secilen_metin = st.selectbox(
+        "🔍 Öğrenci Bul (İsim veya TC yazarak arayabilirsiniz):", 
+        ["-- Lütfen Öğrenci Seçin --"] + ogrenci_listesi
+    )
+
+    if secilen_metin != "-- Lütfen Öğrenci Seçin --":
+        # Seçilen metinden gizli ID'yi çekiyoruz
+        secilen_ogr_id = int(secilen_metin.split("ID:")[1])
+        secilen_ogr_ad = secilen_metin.split(" |")[0]
+        secilen_ogr_tc = secilen_metin.split("TC: ")[1].split(" |")[0]
         
         kart_df = veri_getir("""
             SELECT id as islem_no, vade, tutar, durum, odeme_yontemi, makbuz_no 
@@ -141,9 +161,8 @@ if arama:
             ORDER BY vade ASC
         """, (secilen_ogr_id,))
         
-        # ESKİ KAYITLAR İÇİN GÜVENLİK YAMASI (NaN Hatalarını Önler)
-        kart_df['odeme_yontemi'] = kart_df['odeme_yontemi'].fillna("Belirtilmemiş")
-        kart_df['makbuz_no'] = kart_df['makbuz_no'].fillna("Eski_Kayit")
+        kart_df['odeme_yontemi'] = kart_df['odeme_yontemi'].fillna("-")
+        kart_df['makbuz_no'] = kart_df['makbuz_no'].fillna("-")
         
         t_borc = kart_df['tutar'].sum()
         t_odenen = kart_df[kart_df['durum'] == 'Ödendi']['tutar'].sum()
@@ -151,14 +170,14 @@ if arama:
         
         st.markdown(f"### 📋 {secilen_ogr_ad} | TC: {secilen_ogr_tc}")
         m1, m2, m3 = st.columns(3)
-        m1.metric("Toplam Kayıt Bedeli", f"₺ {t_borc:,.2f}")
-        m2.metric("Tahsil Edilen", f"₺ {t_odenen:,.2f}", delta_color="normal")
-        m3.metric("Kalan Borç", f"₺ {t_kalan:,.2f}", delta="-₺ "+str(t_odenen))
+        m1.metric("Kişi Toplam Kayıt Bedeli", f"₺ {t_borc:,.2f}")
+        m2.metric("Kişiden Tahsil Edilen", f"₺ {t_odenen:,.2f}", delta_color="normal")
+        m3.metric("Kişinin Kalan Borcu", f"₺ {t_kalan:,.2f}", delta="-₺ "+str(t_odenen))
 
         st.write("**Tüm Taksit ve İşlem Geçmişi:**")
         st.dataframe(kart_df, use_container_width=True, hide_index=True, column_config=sutun_ayarlar)
 
-        # ----------------- YENİ ÖDEME ALMA BÖLÜMÜ -----------------
+        # ÖDEME ALMA BÖLÜMÜ
         bekleyenler = kart_df[kart_df['durum'] == 'Bekliyor']
         if not bekleyenler.empty:
             with st.container(border=True):
@@ -178,7 +197,6 @@ if arama:
                 
                 if st.button("Tahsilatı Kesinleştir ve Makbuz Üret", type="primary"):
                     yeni_makbuz_no = f"MKBZ-{datetime.now().strftime('%Y%m%d')}-{islem_id}"
-                    
                     conn = get_connection()
                     cur = conn.cursor()
                     try:
@@ -190,9 +208,8 @@ if arama:
                         else:
                             cur.execute("UPDATE odemeler SET durum='Ödendi', odeme_yontemi=%s, makbuz_no=%s WHERE id=%s", 
                                         (yontem, yeni_makbuz_no, islem_id))
-                        
                         conn.commit()
-                        st.session_state.goster_islem_id = islem_id # Makbuzu garantili bulmak için ID'yi hafızaya alıyoruz
+                        st.session_state.goster_islem_id = islem_id
                         st.success("Ödeme başarıyla işlendi!")
                         time.sleep(1)
                         st.rerun()
@@ -204,29 +221,22 @@ if arama:
         else:
             st.success("Bu öğrencinin bekleyen borcu bulunmamaktadır.")
 
-        # ----------------- GEÇMİŞ MAKBUZ GÖRÜNTÜLEME BÖLÜMÜ -----------------
+        # MAKBUZ GÖRÜNTÜLEME
         odenmisler = kart_df[kart_df['durum'] == 'Ödendi']
         if not odenmisler.empty:
             st.write("#### 🖨️ Makbuz Yazdır")
-            
-            # Seçim kutusu artık kırılmaz "İşlem No" tabanlı
             makbuz_secim = st.selectbox(
                 "Görüntülemek istediğiniz işlemi seçin:", 
                 odenmisler.apply(lambda x: f"İşlem No: {x['islem_no']} | {x['makbuz_no']} - Vade: {x['vade']} - ₺{x['tutar']} ({x['odeme_yontemi']})", axis=1).tolist()
             )
-            
-            # Seçilen işlemin ID'sini güvenli şekilde ayıkla
             secilen_islem_no = int(makbuz_secim.split("İşlem No: ")[1].split(" |")[0])
             makbuz_detay = odenmisler[odenmisler['islem_no'] == secilen_islem_no].iloc[0]
             
-            # Yeni ödeme yapıldıysa otomatik o fişi göster
             if "goster_islem_id" in st.session_state:
-                # Hafızadaki ID'yi kullanarak tam nokta atışı makbuzu bul
                 makbuz_detay = odenmisler[odenmisler['islem_no'] == st.session_state.goster_islem_id].iloc[0]
                 del st.session_state.goster_islem_id
                 st.info("İşleminiz tamamlandı. Aşağıdan makbuzunuzu yazdırabilirsiniz.")
 
-            # HTML Makbuz Şablonu
             st.markdown(f"""
             <div style="border: 2px dashed #666; padding: 30px; border-radius: 5px; background-color: #fafafa; color: black; max-width: 600px; margin: auto;">
                 <h2 style="text-align: center; color: #333; margin-bottom: 5px;">TAHSİLAT MAKBUZU</h2>
@@ -250,9 +260,8 @@ if arama:
                 </table>
             </div>
             """, unsafe_allow_html=True)
-            
-    else:
-        st.warning("Öğrenci bulunamadı. Lütfen ismi veya TC'yi doğru girdiğinizden emin olun.")
+else:
+    st.info("Sistemde henüz kayıtlı öğrenci bulunmuyor. Yeni kayıt oluşturabilirsiniz.")
 
 # ----------------- 3. GÜNLÜK TAKİP -----------------
 st.divider()
@@ -268,5 +277,67 @@ if not df_takip.empty:
 else:
     st.success("Harika! Günü gelen veya geciken bekleyen ödeme yok.")
 
+# ----------------- SİSTEM YÖNETİCİSİ ARAÇLARI (GEÇİCİ) -----------------
+st.divider()
+with st.expander("⚙️ Sistem Yöneticisi Araçları (Excel Yükleme & Sıfırlama)", expanded=False):
+    # 1. EXCEL YÜKLEME
+    st.write("#### 📂 Excel'den Toplu Veri Aktarımı")
+    st.info("Excel başlıklarınız tam olarak şunlar olmalıdır: **ad, veli, tc, telefon, toplam_borc, taksit_sayisi, ilk_tarih**")
+    
+    yuklenen_dosya = st.file_uploader("Hazırladığınız Excel Dosyasını Yükleyin", type=["xlsx", "xls"])
+    if st.button("🚀 Excel Verilerini Sisteme Aktar"):
+        if yuklenen_dosya is not None:
+            try:
+                df_excel = pd.read_excel(yuklenen_dosya)
+                df_excel = df_excel.dropna(subset=['ad', 'tc']) 
+                conn = get_connection()
+                cur = conn.cursor()
+                basarili_kayit = 0
+                for index, row in df_excel.iterrows():
+                    tc_no = str(row['tc']).strip().replace('.0', '')
+                    ad = str(row['ad']).strip()
+                    veli = str(row['veli']).strip() if pd.notna(row['veli']) else ""
+                    telefon = str(row['telefon']).strip() if pd.notna(row['telefon']) else ""
+                    toplam_borc = float(row['toplam_borc'])
+                    taksit_sayisi = int(row['taksit_sayisi'])
+                    ilk_tarih = pd.to_datetime(row['ilk_tarih']).date()
+                    
+                    cur.execute("""
+                        INSERT INTO ogrenciler (ad, veli, telefon, tc) 
+                        VALUES (%s, %s, %s, %s) 
+                        ON CONFLICT (tc) DO UPDATE SET ad=EXCLUDED.ad 
+                        RETURNING id
+                    """, (ad, veli, telefon, tc_no))
+                    ogr_id = cur.fetchone()[0]
+                    
+                    taksit_tutari = toplam_borc / taksit_sayisi
+                    for i in range(taksit_sayisi):
+                        vade = ay_ekle(ilk_tarih, i)
+                        cur.execute("INSERT INTO odemeler (ogrenci_id, vade, tutar) VALUES (%s, %s, %s)", 
+                                    (ogr_id, vade, taksit_tutari))
+                    basarili_kayit += 1
+                conn.commit()
+                st.success(f"🎉 {basarili_kayit} öğrenci başarıyla yüklendi! Lütfen sayfayı yenileyin.")
+            except Exception as e:
+                conn.rollback()
+                st.error(f"Aktarım Hatası: {e}")
+            finally:
+                cur.close()
+        else:
+            st.warning("Lütfen önce dosya seçin.")
 
-
+    st.write("---")
+    # 2. SIFIRLAMA BUTONU
+    st.write("#### ⚠️ Sistemi Sıfırla")
+    if st.button("🚨 TÜM VERİTABANINI SİLK BAŞTAN SIFIRLA"):
+        conn = get_connection()
+        cur = conn.cursor()
+        try:
+            cur.execute("DROP TABLE IF EXISTS odemeler CASCADE;")
+            cur.execute("DROP TABLE IF EXISTS ogrenciler CASCADE;")
+            conn.commit()
+            st.success("Veritabanı sıfırlandı. Lütfen sayfayı yenileyin (F5).")
+        except Exception as e:
+            st.error(f"Hata: {e}")
+        finally:
+            cur.close()
