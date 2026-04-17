@@ -277,67 +277,97 @@ if not df_takip.empty:
 else:
     st.success("Harika! Günü gelen veya geciken bekleyen ödeme yok.")
 
+
 # ----------------- SİSTEM YÖNETİCİSİ ARAÇLARI (GEÇİCİ) -----------------
 st.divider()
-with st.expander("⚙️ Sistem Yöneticisi Araçları (Excel Yükleme & Sıfırlama)", expanded=False):
-    # 1. EXCEL YÜKLEME
-    st.write("#### 📂 Excel'den Toplu Veri Aktarımı")
-    st.info("Excel başlıklarınız tam olarak şunlar olmalıdır: **ad, veli, tc, telefon, toplam_borc, taksit_sayisi, ilk_tarih**")
+with st.expander("⚙️ Sistem Yöneticisi Araçları (Hata Korumalı Aktarım)", expanded=False):
+    st.write("#### 📂 'Hiloş Tahsilat' Şablonu ile Toplu Veri Aktarımı")
     
-    yuklenen_dosya = st.file_uploader("Hazırladığınız Excel Dosyasını Yükleyin", type=["xlsx", "xls"])
+    yuklenen_dosya = st.file_uploader("Orijinal Excel veya CSV Dosyanızı Yükleyin", type=["xlsx", "xls", "csv"])
+    
     if st.button("🚀 Excel Verilerini Sisteme Aktar"):
         if yuklenen_dosya is not None:
+            conn = None
             try:
-                df_excel = pd.read_excel(yuklenen_dosya)
-                df_excel = df_excel.dropna(subset=['ad', 'tc']) 
+                # 1. DOSYA OKUMA
+                if yuklenen_dosya.name.endswith('.csv'):
+                    try:
+                        df_excel = pd.read_csv(yuklenen_dosya, dtype=str)
+                        if len(df_excel.columns) == 1: 
+                            yuklenen_dosya.seek(0)
+                            df_excel = pd.read_csv(yuklenen_dosya, sep=';', dtype=str) 
+                    except:
+                        yuklenen_dosya.seek(0)
+                        df_excel = pd.read_csv(yuklenen_dosya, sep=';', dtype=str)
+                else:
+                    df_excel = pd.read_excel(yuklenen_dosya, dtype=str)
+                
+                df_excel.columns = df_excel.columns.str.strip()
+                aranan_sutun = 'Öğr. TC Kimlik No'
+                
+                if aranan_sutun not in df_excel.columns:
+                    st.error(f"🚨 HATA: Dosyada '{aranan_sutun}' sütunu bulunamadı!")
+                    st.stop()
+                
+                # Boş satırları temizle
+                df_excel = df_excel.dropna(subset=[aranan_sutun, 'Öğrencinin Adı Soyadı'])
+                
                 conn = get_connection()
                 cur = conn.cursor()
-                basarili_kayit = 0
+                islem_sayisi = 0
+                
+                progress_bar = st.progress(0)
+                total_rows = len(df_excel)
+                
                 for index, row in df_excel.iterrows():
-                    tc_no = str(row['tc']).strip().replace('.0', '')
-                    ad = str(row['ad']).strip()
-                    veli = str(row['veli']).strip() if pd.notna(row['veli']) else ""
-                    telefon = str(row['telefon']).strip() if pd.notna(row['telefon']) else ""
-                    toplam_borc = float(row['toplam_borc'])
-                    taksit_sayisi = int(row['taksit_sayisi'])
-                    ilk_tarih = pd.to_datetime(row['ilk_tarih']).date()
+                    # --- Veri Temizliği ---
+                    tc_no = str(row[aranan_sutun]).strip().replace('.0', '')
+                    ad = str(row['Öğrencinin Adı Soyadı']).strip()
                     
+                    # TARİH KONTROLÜ (NaT Hatasını Önler)
+                    vade_ham = row.get('Vade Tarihi')
+                    vade_tarihi = pd.to_datetime(vade_ham, errors='coerce')
+                    
+                    if pd.isna(vade_tarihi):
+                        # Eğer tarih boşsa bugün olarak ata veya o satırı atlamak isterseniz 'continue' kullanın
+                        vade_tarihi = date.today()
+                    else:
+                        vade_tarihi = vade_tarihi.date()
+                        
+                    # TUTAR KONTROLÜ (NaN Hatasını Önler)
+                    tutar_ham = str(row.get('Ödeme Tutarı', '0')).replace(',', '.').replace('₺', '').strip()
+                    try:
+                        tutar = float(tutar_ham)
+                        if pd.isna(tutar): tutar = 0.0
+                    except:
+                        tutar = 0.0
+                    
+                    durum_ham = str(row.get('Ödeme Gerçekleşti mi?', '')).strip().lower()
+                    durum = 'Ödendi' if durum_ham in ['evet', 'ödendi', 'e', 'true', '1', 'var'] else 'Bekliyor'
+                    
+                    # --- Veritabanı İşlemi ---
                     cur.execute("""
                         INSERT INTO ogrenciler (ad, veli, telefon, tc) 
-                        VALUES (%s, %s, %s, %s) 
+                        VALUES (%s, '-', '-', %s) 
                         ON CONFLICT (tc) DO UPDATE SET ad=EXCLUDED.ad 
                         RETURNING id
-                    """, (ad, veli, telefon, tc_no))
+                    """, (ad, tc_no))
                     ogr_id = cur.fetchone()[0]
                     
-                    taksit_tutari = toplam_borc / taksit_sayisi
-                    for i in range(taksit_sayisi):
-                        vade = ay_ekle(ilk_tarih, i)
-                        cur.execute("INSERT INTO odemeler (ogrenci_id, vade, tutar) VALUES (%s, %s, %s)", 
-                                    (ogr_id, vade, taksit_tutari))
-                    basarili_kayit += 1
+                    cur.execute("""
+                        INSERT INTO odemeler (ogrenci_id, vade, tutar, durum, odeme_yontemi, makbuz_no) 
+                        VALUES (%s, %s, %s, %s, 'Aktarım', 'Excel_Aktarim')
+                    """, (ogr_id, vade_tarihi, tutar, durum))
+                    
+                    islem_sayisi += 1
+                    progress_bar.progress(int((islem_sayisi / total_rows) * 100))
+                
                 conn.commit()
-                st.success(f"🎉 {basarili_kayit} öğrenci başarıyla yüklendi! Lütfen sayfayı yenileyin.")
+                st.success(f"🎉 {islem_sayisi} adet işlem başarıyla aktarıldı!")
+                st.rerun()
+                
             except Exception as e:
-                conn.rollback()
-                st.error(f"Aktarım Hatası: {e}")
+                if conn is not None: conn.rollback()
+                st.error(f"🚨 Aktarım Hatası: {e}")
             finally:
-                cur.close()
-        else:
-            st.warning("Lütfen önce dosya seçin.")
-
-    st.write("---")
-    # 2. SIFIRLAMA BUTONU
-    st.write("#### ⚠️ Sistemi Sıfırla")
-    if st.button("🚨 TÜM VERİTABANINI SİLK BAŞTAN SIFIRLA"):
-        conn = get_connection()
-        cur = conn.cursor()
-        try:
-            cur.execute("DROP TABLE IF EXISTS odemeler CASCADE;")
-            cur.execute("DROP TABLE IF EXISTS ogrenciler CASCADE;")
-            conn.commit()
-            st.success("Veritabanı sıfırlandı. Lütfen sayfayı yenileyin (F5).")
-        except Exception as e:
-            st.error(f"Hata: {e}")
-        finally:
-            cur.close()
+                if 'cur' in locals(): cur.close()
