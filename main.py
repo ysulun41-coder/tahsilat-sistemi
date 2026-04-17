@@ -350,8 +350,8 @@ with st.expander("⚙️ Sistem Yöneticisi Araçları", expanded=False):
                 st.error(f"Hata: {e}")
             finally:
                 if 'cur' in locals(): cur.close()
-                    
- if st.button("🚨 TÜM VERİTABANINI SIFIRLA"):
+
+    if st.button("🚨 TÜM VERİTABANINI SIFIRLA"):
         conn = get_connection(); cur = conn.cursor()
         cur.execute("DROP TABLE IF EXISTS odemeler CASCADE; DROP TABLE IF EXISTS ogrenciler CASCADE;")
         conn.commit(); st.success("Sıfırlandı. Sayfayı yenileyin."); cur.close()
