@@ -264,18 +264,23 @@ else:
     st.info("Sistemde henüz kayıtlı öğrenci bulunmuyor. Yeni kayıt oluşturabilirsiniz.")
 
 # ----------------- 3. GÜNLÜK TAKİP -----------------
+# ----------------- 3. GÜNLÜK TAKİP -----------------
 st.divider()
 st.subheader("📅 Günlük Ödeme Takip Ekranı")
+st.info("Bu liste sadece bugün ödemesi olanları ve ödemesi gecikenleri gösterir.")
+
+# Sorguyu güncelledik: Sadece bugüne eşit veya bugünden küçük (vadesi geçmiş) olanlar
 df_takip = veri_getir("""
     SELECT o.vade, ogr.ad, ogr.tc, o.tutar, o.durum 
     FROM odemeler o JOIN ogrenciler ogr ON o.ogrenci_id = ogr.id 
-    WHERE o.vade <= %s AND o.durum = 'Bekliyor' ORDER BY o.vade ASC
+    WHERE o.vade <= %s AND o.durum = 'Bekliyor' 
+    ORDER BY o.vade ASC
 """, (date.today(),))
 
 if not df_takip.empty:
     st.dataframe(df_takip, use_container_width=True, hide_index=True, column_config=sutun_ayarlar)
 else:
-    st.success("Harika! Günü gelen veya geciken bekleyen ödeme yok.")
+    st.success("Harika! Bugünün tüm tahsilatları tamamlanmış veya bekleyen gecikmiş ödeme yok.")
 
 
 # ----------------- SİSTEM YÖNETİCİSİ ARAÇLARI (GEÇİCİ) -----------------
