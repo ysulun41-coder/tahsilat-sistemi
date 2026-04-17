@@ -32,7 +32,7 @@ def check_password():
 if not check_password():
     st.stop()
 # Kodu en başa, st.set_page_config'den hemen sonra ekle
-bakim_modu = True  # Erişimi açmak istediğinde False yapman yeterli
+bakim_modu = False  # Erişimi açmak istediğinde False yapman yeterli
 
 if bakim_modu:
     st.warning("⚠️ Sistem şu an güncelleniyor ve geçici olarak erişime kapatılmıştır.")
@@ -350,6 +350,33 @@ with st.expander("⚙️ Sistem Yöneticisi Araçları", expanded=False):
                 st.error(f"Hata: {e}")
             finally:
                 if 'cur' in locals(): cur.close()
+                    st.subheader("📥 Veri Yedekleme")
+
+df_yedek = veri_getir("""
+SELECT 
+    ogr.ad AS ogrenci_adi,
+    ogr.tc,
+    o.vade,
+    o.tutar,
+    o.durum,
+    o.odeme_yontemi,
+    o.makbuz_no
+FROM odemeler o
+JOIN ogrenciler ogr ON o.ogrenci_id = ogr.id
+ORDER BY ogr.ad, o.vade
+""")
+
+if not df_yedek.empty:
+    csv = df_yedek.to_csv(index=False).encode("utf-8-sig")
+
+    st.download_button(
+        "📥 Excel Olarak İndir (Yedek)",
+        data=csv,
+        file_name=f"tahsilat_yedek_{date.today()}.csv",
+        mime="text/csv"
+    )
+else:
+    st.info("Yedeklenecek veri bulunamadı.")
 
     if st.button("🚨 TÜM VERİTABANINI SIFIRLA"):
         conn = get_connection(); cur = conn.cursor()
