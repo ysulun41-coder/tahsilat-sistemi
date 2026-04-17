@@ -8,7 +8,7 @@ import time
 # Sayfa Ayarları
 st.set_page_config(page_title="Okul Tahsilat Sistemi", layout="wide")
 # Kodu en başa, st.set_page_config'den hemen sonra ekle
-bakim_modu = True  # Erişimi açmak istediğinde False yapman yeterli
+bakim_modu = False  # Erişimi açmak istediğinde False yapman yeterli
 
 if bakim_modu:
     st.warning("⚠️ Sistem şu an güncelleniyor ve geçici olarak erişime kapatılmıştır.")
