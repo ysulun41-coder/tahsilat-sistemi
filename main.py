@@ -9,25 +9,28 @@ import time
 st.set_page_config(page_title="Okul Tahsilat Sistemi", layout="wide")
 
 
-APP_PASSWORD = "12583769"  # ← buraya şifreni yaz
-
 def check_password():
-    if "giris_yapildi" not in st.session_state:
-        st.session_state.giris_yapildi = False
+    def password_entered():
+        if st.session_state["password"] == st.secrets["APP_PASSWORD"]:
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]
+        else:
+            st.session_state["password_correct"] = False
 
-    if not st.session_state.giris_yapildi:
-        sifre = st.text_input("🔐 Şifre", type="password")
+    if "password_correct" not in st.session_state:
+        st.text_input("🔐 Şifre", type="password", on_change=password_entered, key="password")
+        return False
 
-        if st.button("Giriş Yap"):
-            if sifre == APP_PASSWORD:
-                st.session_state.giris_yapildi = True
-                st.rerun()
-            else:
-                st.error("❌ Şifre yanlış")
+    elif not st.session_state["password_correct"]:
+        st.text_input("🔐 Şifre", type="password", on_change=password_entered, key="password")
+        st.error("❌ Şifre yanlış")
+        return False
 
-        st.stop()
+    else:
+        return True
 
-check_password()
+if not check_password():
+    st.stop()
 # Kodu en başa, st.set_page_config'den hemen sonra ekle
 bakim_modu = False  # Erişimi açmak istediğinde False yapman yeterli
 
