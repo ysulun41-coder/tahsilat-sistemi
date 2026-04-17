@@ -351,8 +351,7 @@ with st.expander("⚙️ Sistem Yöneticisi Araçları", expanded=False):
             finally:
                 if 'cur' in locals(): cur.close()
                     
-                    st.subheader("📥 Veri Yedekleme")
-
+st.subheader("📥 Veri Yedekleme")
  df_yedek = veri_getir("""
 SELECT 
     ogr.ad AS ogrenci_adi,
