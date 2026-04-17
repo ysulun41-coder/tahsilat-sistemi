@@ -38,7 +38,7 @@ def init_db():
 
 init_db()
 
-# Tarih yardımcı fonksiyonu (Ay ekleme)
+# Tarih yardımcı fonksiyonu
 def ay_ekle(baslangic_tarihi, ay_sayisi):
     ay = baslangic_tarihi.month - 1 + ay_sayisi
     yil = baslangic_tarihi.year + ay // 12
@@ -46,12 +46,14 @@ def ay_ekle(baslangic_tarihi, ay_sayisi):
     gun = min(baslangic_tarihi.day, calendar.monthrange(yil, ay)[1])
     return date(yil, ay, gun)
 
+# HIZ VE GÜNCELLEME DÜZELTMESİ (Bekliyor hatası için commit eklendi)
 def veri_getir(query, params=None):
     conn = get_connection()
     try:
         df = pd.read_sql(query, conn, params=params)
+        conn.commit()  # Veritabanı önbelleğini temizler, en taze veriyi okur
         return df
-    except:
+    except Exception as e:
         conn.rollback()
         return pd.DataFrame()
 
@@ -73,7 +75,10 @@ with st.expander("👨‍🎓 Yeni Öğrenci Kaydı ve Sözleşme Oluştur", exp
             y_tc = st.text_input("TC Kimlik No")
         with c2:
             y_tel = st.text_input("Telefon")
-            y_toplam = st.number_input("Toplam Eğitim Bedeli", min_value=0.0)
+            y_toplam = st.number_input("Toplam Eğitim Bedeli", min_value=0.0, step=1000.0)
+            # PARA OKUNUŞU İÇİN YARDIMCI EKRAN
+            st.caption(f"**Girilen Tutarın Okunuşu:** :blue[₺ {y_toplam:,.2f}]")
+            
             y_taksit = st.number_input("Taksit Sayısı", min_value=1, value=10)
         
         y_tarih = st.date_input("İlk Ödeme Tarihi", value=date.today())
@@ -94,10 +99,9 @@ with st.expander("👨‍🎓 Yeni Öğrenci Kaydı ve Sözleşme Oluştur", exp
                             (ogr_id, vade, taksit_tutari))
             conn.commit()
             
-            # Yazıcı çıktısı için bilgilendirme
             st.success(f"Kayıt Başarılı! Aşağıdaki dökümü yazdırıp veliye verebilirsiniz.")
             
-            # --- YAZDIRILABİLİR ALAN ---
+            # Yazdırılabilir Alan
             st.markdown(f"""
             <div style="border: 2px solid #ccc; padding: 20px; border-radius: 10px; background-color: white; color: black;">
                 <h2 style="text-align: center;">ÖĞRENCİ KAYIT VE ÖDEME PLANI</h2>
@@ -128,17 +132,16 @@ with st.expander("👨‍🎓 Yeni Öğrenci Kaydı ve Sözleşme Oluştur", exp
 st.divider()
 st.subheader("💰 Tahsilat İşlemi ve Öğrenci Kartı")
 
-arama = st.text_input("🔍 Öğrenci Bul (Ad veya TC)")
+arama = st.text_input("🔍 Öğrenci Bul (Ad veya TC giriniz)")
 
 if arama:
-    # Önce öğrenciyi bulalım
     ogr_df = veri_getir("SELECT * FROM ogrenciler WHERE ad ILIKE %s OR tc LIKE %s", (f"%{arama}%", f"%{arama}%"))
     
     if not ogr_df.empty:
         secilen_ogr_id = ogr_df.iloc[0]['id']
         secilen_ogr_ad = ogr_df.iloc[0]['ad']
+        secilen_ogr_tc = ogr_df.iloc[0]['tc'] # TC EKLENDİ
         
-        # Kişinin Tüm Kartını (Ekstresini) Getirelim
         kart_df = veri_getir("""
             SELECT id as islem_no, vade, tutar, durum 
             FROM odemeler 
@@ -146,22 +149,20 @@ if arama:
             ORDER BY vade ASC
         """, (int(secilen_ogr_id),))
         
-        # --- ÖĞRENCİ KARTI (ÖZET METRİKLER) ---
         t_borc = kart_df['tutar'].sum()
         t_odenen = kart_df[kart_df['durum'] == 'Ödendi']['tutar'].sum()
         t_kalan = t_borc - t_odenen
         
-        st.markdown(f"### 📋 {secilen_ogr_ad} - Hesap Kartı")
+        # TC KİMLİK KART BAŞLIĞINA EKLENDİ
+        st.markdown(f"### 📋 {secilen_ogr_ad} | TC: {secilen_ogr_tc}")
         m1, m2, m3 = st.columns(3)
         m1.metric("Toplam Kayıt Bedeli", f"₺ {t_borc:,.2f}")
         m2.metric("Tahsil Edilen", f"₺ {t_odenen:,.2f}", delta_color="normal")
         m3.metric("Kalan Borç", f"₺ {t_kalan:,.2f}", delta="-₺ "+str(t_odenen))
 
-        # --- TÜM TAKSİT TABLOSU ---
         st.write("**Tüm Taksit Geçmişi:**")
         st.dataframe(kart_df, use_container_width=True, hide_index=True, column_config=sutun_ayarlar)
 
-        # --- TAHSİLAT GİRİŞ ALANI ---
         bekleyenler = kart_df[kart_df['durum'] == 'Bekliyor']
         if not bekleyenler.empty:
             st.divider()
@@ -173,7 +174,9 @@ if arama:
             asil_tutar = float(bekleyenler[bekleyenler['islem_no'] == islem_id]['tutar'].values[0])
             vade_tarihi = bekleyenler[bekleyenler['islem_no'] == islem_id]['vade'].values[0]
 
-            tutar_giris = st.number_input("Kasaya Giren Miktar", min_value=0.0, max_value=asil_tutar, value=asil_tutar)
+            tutar_giris = st.number_input("Kasaya Giren Miktar", min_value=0.0, max_value=asil_tutar, value=asil_tutar, step=500.0)
+            # PARA OKUNUŞU İÇİN YARDIMCI EKRAN
+            st.caption(f"**Kasaya İşlenecek Net Tutar:** :green[₺ {tutar_giris:,.2f}]")
             
             if st.button("Tahsilatı Kesinleştir"):
                 conn = get_connection()
@@ -186,7 +189,7 @@ if arama:
                     else:
                         cur.execute("UPDATE odemeler SET durum='Ödendi' WHERE id=%s", (islem_id,))
                     conn.commit()
-                    st.success("Ödeme kartına işlendi!")
+                    st.success("Ödeme kartına başarıyla işlendi!")
                     st.rerun()
                 except Exception as e:
                     conn.rollback()
