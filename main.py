@@ -32,7 +32,7 @@ if not check_password():
     st.stop()
 
 # Bakım Modu
-bakim_modu = True  # Erişimi açmak istediğinde False yapman yeterli
+bakim_modu = False  # Erişimi açmak istediğinde False yapman yeterli
 
 if bakim_modu:
     st.warning("⚠️ Sistem şu an güncelleniyor ve geçici olarak erişime kapatılmıştır.")
