@@ -8,7 +8,6 @@ import time
 # Sayfa Ayarları
 st.set_page_config(page_title="Okul Tahsilat Sistemi", layout="wide")
 
-
 def check_password():
     def password_entered():
         if st.session_state["password"] == st.secrets["APP_PASSWORD"]:
@@ -31,15 +30,14 @@ def check_password():
 
 if not check_password():
     st.stop()
-# Kodu en başa, st.set_page_config'den hemen sonra ekle
+
+# Bakım Modu
 bakim_modu = True  # Erişimi açmak istediğinde False yapman yeterli
 
 if bakim_modu:
     st.warning("⚠️ Sistem şu an güncelleniyor ve geçici olarak erişime kapatılmıştır.")
     st.info("Lütfen daha sonra tekrar deneyiniz.")
-    st.stop()  # Bu komut, alttaki hiçbir kodun çalışmamasını sağlar
-
-
+    st.stop()  
 
 # ----------------- VERİTABANI VE BAĞLANTI -----------------
 @st.cache_resource(ttl=300)
@@ -169,11 +167,9 @@ with st.expander("👨‍🎓 Yeni Öğrenci Kaydı ve Sözleşme Oluştur", exp
 st.divider()
 st.subheader("💰 Tahsilat İşlemi ve Öğrenci Kartı")
 
-# YENİ NESİL AKILLI ARAMA (Yazarken Filtreler)
 tum_ogrenciler = veri_getir("SELECT id, ad, tc FROM ogrenciler ORDER BY ad ASC")
 
 if not tum_ogrenciler.empty:
-    # Öğrencileri listeye dönüştür (Örn: "Ahmet Yılmaz | TC: 123... | ID:5")
     ogrenci_listesi = tum_ogrenciler.apply(lambda x: f"{x['ad']} | TC: {x['tc']} | ID:{x['id']}", axis=1).tolist()
     
     secilen_metin = st.selectbox(
@@ -182,7 +178,6 @@ if not tum_ogrenciler.empty:
     )
 
     if secilen_metin != "-- Lütfen Öğrenci Seçin --":
-        # Seçilen metinden gizli ID'yi çekiyoruz
         secilen_ogr_id = int(secilen_metin.split("ID:")[1])
         secilen_ogr_ad = secilen_metin.split(" |")[0]
         secilen_ogr_tc = secilen_metin.split("TC: ")[1].split(" |")[0]
@@ -309,8 +304,6 @@ if not df_takip.empty:
     st.dataframe(df_takip, use_container_width=True, hide_index=True, column_config=sutun_ayarlar)
 else:
     st.success("Harika! Günü gelen veya geciken bekleyen ödeme yok.")
-
-
 
 # ----------------- SİSTEM ARAÇLARI (EXCEL AKTARIM DÜZELTİLDİ) -----------------
 st.divider()
